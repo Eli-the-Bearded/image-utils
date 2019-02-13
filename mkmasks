@@ -1,0 +1,147 @@
+#!/bin/ksh
+# Feb 2012		Benjamin Elijah Griffin
+
+usage () {
+  cat <<'EndUsage'
+Split one ppm into many pbm images, each output image a repesenting in white
+(unless inverted) where a particular color existed in the original.
+
+Usage:
+	mkmasks [ options ] input  > filenamelist
+
+Options:
+	-i	--invert	invert all output imagemasks
+	-d	--dec		name output images via decimal tuples
+	-h	--hex		name output images via hex tuples (default)
+	-a S	--prefix S	prefix file names with S (default: mask-)
+	-z S	--postfix S	postfix file names with S (default: .pbm)
+	-s 	--subdirs	put files into RED/GREEN/ subdirs
+	-w D	--workdir D	put files (and -s subdirs) into directory D
+
+With --subdirs, a pink mask might end up in ff/80/mask-ff8040.pbm or
+255/128/mask-255128064.pbm
+EndUsage
+}
+
+missing=white
+found=black
+subdirs=
+name=hex
+prefix=mask-
+postfix=.pbm
+workdir=./
+
+done=no
+while [ $done == no ] ; do
+  case "X$1" in
+  	X-h|X--help) usage; exit ;; 
+  	X-i|X--invert) missing=black ; found=white ; shift ;;
+  	X-d|X--dec) name=dec ; shift ;;
+  	X-h|X--hex) name=dec ; shift ;;
+  	X-s|X--subdirs) subdirs=yes ; shift ;;
+  	X-a|X--prefix) shift; prefix="$1" ; shift ;;
+  	X-z|X--postfix) shift; postfix="$1" ; shift ;;
+  	X-w|X--workdir) shift; workdir="$1" ; shift ;;
+	X-*) echo "$0: Unreconized option: $1\nUse --help for usage." >&2
+	     exit 2 ;;
+  	X*) done=yes ;;
+  esac
+done
+
+input="$1"
+if [ ! -f "$input" ] ; then
+  echo "$0: missing input image, use --help for usage\n"; >&2
+  exit;
+fi
+
+tmpinfo=/tmp/masks-$$.txt
+tmpmap=/tmp/masks-$$.map
+
+cleanup () {
+  rm -f $tmpinfo $tmpmap "$1"
+}
+
+cleanup
+
+makefmt="rgb:%02x/%02x/%02x"
+iswhite="rgb:ff/ff/ff"
+isblack="rgb:00/00/00"
+
+if [ $name == hex ] ; then
+  numfmt="%02x%02x%02x"
+  dirfmt="%02x%02x"
+else
+  # decimal
+  numfmt="%03d%03d%03d" 
+  dirfmt="%03d/%03d" 
+fi
+
+if [ "X$subdirs" != Xyes ] ; then
+  dirfmt=""
+fi
+
+mkdir -p "$workdir"
+
+makeone () {
+  color=$(printf "$numfmt"                  $1 $2 $3)
+  mkclr=$(printf "$makefmt"                 $1 $2 $3)
+
+  case "X$dirfmt" in 
+    X)  dir="$workdir" ;;
+    X*) dir=$(printf "%s$dirfmt" "$workdir" $1 $2   )
+        mkdir -p "$dir"
+        ;;
+  esac
+
+  file="$dir/$prefix$color$postfix"
+
+  echo "$file" >&2
+
+  ppmmake $mkclr 1 1 > $tmpmap
+
+  case "$mkclr:$missing" in
+    $iswhite:white|$isblack:black) 
+	pnmremap -mapfile=$tmpmap -missing=$found "$input" 2>/dev/null | \
+	  pnminvert | pamditherbw -threshold -value 0.999 | pamtopnm \
+	  > "$file"
+    ;;
+    *)
+	pnmremap -mapfile=$tmpmap -missing=$missing "$input" 2>/dev/null | \
+	  pamditherbw -threshold -value 0.999 | pamtopnm \
+	  > "$file"
+    ;;
+  esac
+}
+
+ppmhist "$input" > $tmpinfo
+
+#    r     g     b         lum     count
+# ----- ----- -----      -----   -------
+#    70    64    66         66    122541
+#   136   124   118        127    111689
+# ...
+
+this=colheader
+while read line ; do
+  case "$this" in
+    colheader)
+		case "$line" in
+		  *r*g*b*lum*count*) this=hyphens ;;
+		  *) echo "$0: unexpected output from ppmhist $tmpinfo" >&2
+		     exit 1 ;;
+		esac
+    ;;
+    hyphens)
+		this=colors
+    ;;
+    colors)
+                makeone $line
+    ;;
+  esac
+done < $tmpinfo
+
+if [ $this != colors ] ; then
+  echo "$0: unexpected output (or lack of output) from ppmhist $tmpinfo" >&2
+fi
+
+cleanup

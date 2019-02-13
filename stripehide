@@ -1,0 +1,150 @@
+#!/usr/bin/perl -w
+# Take a PBM or PGM image and hide it in diagonal stripes.
+# Up close the image is pretty well hidden, from a distance it pops out.
+#
+# 4 May 2012
+use strict;
+use Image::PBMlib2;
+use vars qw( $filein $fileout %info @pix %options $rc $id
+	   );
+
+
+%options = (
+	verbose => 0,
+	stripe => 4,
+);
+
+$id = $0;
+$id =~ s,.*/([^/]+),$1,;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^-s$|^--stripe/) {
+    $options{stripe} = shift(@ARGV);
+    if(!defined($options{stripe})) { usage("Missing a stripe size"); }
+    if($options{stripe} < 1) { usage("Not a valid stripe size"); }
+    next;
+  }
+
+  if(/^-v$|^--verbose/) {
+    $options{verbose} = 1;
+    next;
+  }
+
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+readpnmfile( \*STDIN, \%info, \@pix, 'float' );
+
+if(length($info{error})) {
+  die "$id: input image: $info{error}\n";
+}
+
+if($info{bgp} eq 'p') {
+  die "$id: input image cannot be pixmap\n";
+}
+
+process(\%options, \%info, \@pix );
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+
+writepnmfile( \*STDOUT, \%info, \@pix );
+exit;
+
+sub process {
+  my $o = shift;	# option hash ref
+  my $i = shift;	# info hash ref
+  my $p = shift;	# pixel array
+
+  my $r;	# loop row
+  my $c;	# loop col
+  my $w;	# white
+  my $b;	# black
+  my $s;	# stripe state
+  my $a;	# count into stripe pattern
+  my $m;	# stripe max
+  my $t;	# stripe threshold
+
+
+  $t = $$o{stripe};
+  $m = $t * 2 + 1;
+  $s = 0;
+
+  if($$i{bgp} eq 'b') {
+    $w = 1;
+    $b = 0;
+  } else {
+    $w = '1.0,';
+    $b = '0.0,';
+  }
+
+  for($r = 0; $r < $$i{height}; $r ++) {
+    $a = $s;
+
+    for($c = 0; $c < $$i{width}; $c ++) {
+      if($a == $m) {
+        1; # do nothing
+      } elsif($a > $t) {
+        $$p[$r][$c] = $b;
+      } else {
+        $$p[$r][$c] = $w;
+      }
+      $a ++;
+      if($a > $m) { $a = 0; }
+    }
+
+    $s ++;
+    if($s > $m) { $s = 0; }
+  }
+
+} # end &process 
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+	stripehide [ OPTIONS ] [ INPUT [ OUTPUT ] ]
+
+Options:
+	-s SIZE    --stripe SIZE	size of stripes (default: 4)
+	-v         --verbose		be verbose
+
+Take a PBM or PGM image and hide it in diagonal stripes.
+END_usage
+
+  exit($exit);
+} # end &usage
+
+__END__

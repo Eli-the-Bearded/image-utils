@@ -1,0 +1,329 @@
+#!/usr/bin/perl -w
+# Take a PPM image and blow up the pixels to resemble those on an LED
+# monitor.
+#
+# 18 Jun 2012
+use strict;
+use Image::PBMlib;
+use vars qw( %cfv %stackmemo @order $mv
+	     $filein $fileout %info @pixels %options $rc $id
+	     );
+sub mk_cfv();
+
+
+%options = (
+	verbose => 0,
+	boxsize => 18,	# designed for ( ( odd number + 1 ) * 3)
+);
+
+
+$mv      = 5;		# global max value (for output)
+@order   = qw( b g r );	# global color bar order
+mk_cfv(); # set %cfv global from $mv and @order
+
+$id = $0;
+$id =~ s,.*/([^/]+),$1,;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^-b$|^--boxsize/) {
+    $options{boxsize} = shift;
+    if(!defined($options{boxsize})) {
+      usage("Need a boxsize with $_");
+    }
+    next;
+  }
+
+  if(/^-v$|^--verbose/) {
+    $options{verbose} = 1;
+    next;
+  }
+
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+readpnmfile( \*STDIN, \%info, \@pixels, 'float' );
+
+if(length($info{error})) {
+  die "$0: input image: $info{error}\n";
+}
+
+if($info{bgp} ne 'p') {
+  die "$0: input is not pixmap, cannot pixelize\n";
+}
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+
+print STDOUT makepnmheader(3, ($info{width} * $options{boxsize}),
+ 			      ($info{height} * $options{boxsize}),
+			      $mv);
+
+# writes to STDOUT as it goes
+process(\%options, \%info, \@pixels);
+
+# writepnmfile( \*STDOUT, \%info, \@pixels );
+exit;
+
+sub process {
+  my $o = shift;	# hash ref
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my $bsize = $$o{boxsize};
+  my $itall = $$i{height};
+  my $j;
+
+  for($j = 0; $j < $itall; $j ++) {
+    # writes to STDOUT as it goes
+    process_line($bsize, $$p[$j]);
+  }
+
+} # end &process 
+
+sub process_line {
+  my $size = shift;
+  my $r    = shift;        # array ref to 1d array
+  my $v;
+  my $l;
+  my @rgb;
+
+  for($l = 0; $l < $size; $l ++) {
+    for $v (@{$r}) {
+      @rgb = explodetriple($v);
+      chop(@rgb); # remove ,
+      print drawline($l, $size, @rgb);
+    }
+  }
+} # end &process_line
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+	ledpixelize [ OPTIONS ] [ INPUT [ OUTPUT ] ]
+
+Options:
+  -b SIZE    --boxsize SIZE	use output "pixels" SIZE large (def:18)
+  -v         --verbose		be verbose
+
+Takes a PPM file and styles it like it was displayed on an LED
+monitor. Each pixel is blown up to nine squares (in three single
+color columns). The brightness of each color is concentrated to
+the top of the column. Columns are not in RGB order.
+
+SIZE is intended to be ((odd number) + 1 ) x 3
+END_usage
+
+  exit($exit);
+} # end &usage
+
+
+# what a single pixel looks like:
+#
+# .BBBBB.GGGGG.RRRRR	each pixel is three stacks of three squares
+# .BBBBB.GGGGG.RRRRR	key: R-red, G-green, B-blue .-black
+# .BBBBB.GG.GG RR.RR	s = size of whole pixel
+# .BBBBB.GGGGG.RRRRR	S = (s/3) - 1	size of inner square
+# .BBBBB.GGGGG.RRRRR	M = round(s/2)	middle of inner square
+# ..................	
+# .BB.BB.gg.gg.rr.rr	5: very brightest is SxS of one color
+# .BB.BB.gg.gg.rr.rr	4: one   down from very brightest has black center and dimmer
+# ..................	3: two   down from very brightest has black plus and dimmer
+# .BB.BB.gg.gg.rr.rr	2: three down from very brightest has black plus and dimmer
+# .BB.BB.gg.gg.rr.rr	1: four  down from very brightest has black plus and dimmer
+# ..................	0: five  down from very brightest is all black
+# .bb.bb.gg.gg......	
+# .bb.bb.gg.gg......	full color $RGB[n] is stack of three full brights
+# ..................	dimmer colors use full bright at top and less below
+# .bb.bb.gg.gg......
+# .bb.bb.gg.gg......
+# ..................
+
+# returns pixels to one line of one of those expanded pixel boxes
+#   $pixstring = drawline( which_line_in_whole_pixel, size_of_whole_pixel,
+#	red_value, green_value, blue_value )
+sub drawline {
+  my $l = shift;	# which line within the box
+  my $s = shift;	# size of the whole box
+  my %p = ( r => shift, g => shift, b => shift);	# values for single pixel
+
+  my $s3  = int( $s / 3 );	# 1/3rd of whole box
+  my $s23 = 2 * $s3;		# 2/3rds of whole box
+  my $S   = $s3 - 1;		# colored area with each third
+  my $M   = int($S / 2);	# middle of $S, counting from 0
+
+  my $c;
+  my $buff = '';
+  my $black = $cfv{'r0'};	# r0 eq b0 eq g0, so any will do
+
+  if(($l == 0) or ($l == $s3) or ($l == $s23)) {
+    # all black row
+    #        R G B   x box size
+    $buff = $black x $s;
+    return $buff . "\n";	# \n for ascii mode
+  }
+
+  for $c (@order) {
+    my @stack = stack_from_value($p{$c});
+    my $value;
+    my $color;
+    my $pl;
+
+    if($l < $s3) {
+      $value = $stack[0];
+      $pl = $l;
+      # debug print STDERR "line $l, first in stack\n";
+    } elsif ($l < $s23) {
+      $value = $stack[1];
+      # debug print STDERR "line $l, second in stack\n";
+      $pl = $l - $s3;
+    } else {
+      # debug print STDERR "line $l, third in stack\n";
+      $value = $stack[2];
+      $pl = $l - $s23;
+    }
+    # correct for black lines between blocks
+    $pl --;
+
+    $color = color_from_value($value, $c);
+
+
+    # no line by line diff for these
+    if($value == 0 or $value == $mv) {
+      $buff .= $black . ( $color x $S );
+      # debug print STDERR "line $l: black + val $value x $S, color $c\n";
+    } elsif($value == ($mv - 1)) {
+      # dim center
+      if($pl == $M) {
+	# debug print STDERR "line $l: black + val $value x $M, black, $value x $M, color $c (center)\n";
+	$buff .= $black . ( $color x $M ) . $black . ( $color x $M );
+      } else {
+	# debug print STDERR "line $l: black + val $value x $S, color $c\n";
+	$buff .= $black . ( $color x $S );
+      }
+    } else {
+      # dim cross
+      if($pl == $M) {
+	$buff .= $black x (1+$S);
+	# debug print STDERR "line $l: black (cross)\n";
+      } else {
+	# debug print STDERR "line $l: black + val $value x $M, black, $value x $M, color $c (cross)\n";
+	$buff .= $black . ( $color x $M ) . $black . ( $color x $M );
+      }
+    }
+  } # for each color
+
+  $buff .= "\n";	# for ascii mode output
+
+  return $buff;
+} # drawline
+
+# from a brightness value and a single channel,
+# make an RGB color that represents that.
+# all possible colors have been worked out in advance
+sub color_from_value {
+  my $value = shift;
+  my $c     = shift;
+  $value = int($value);
+
+  return $cfv{"$c$value"};
+} # color_from_value
+
+# work out all possible colors for color_from_value()
+sub mk_cfv() {
+  my $black = " 0";
+  my $bright;
+  my $pix;
+
+  for my $v (0..$mv) {
+    $bright = " $v";
+
+    for my $c (@order) {
+
+      if($c eq 'r') {
+	$pix = "$bright$black$black";
+      } elsif($c eq 'g') {
+	$pix = "$black$bright$black";
+      } else {
+	$pix = "$black$black$bright";
+      }
+
+      $cfv{"$c$v"} = $pix;
+    }
+  }
+} # mk_cfv
+
+# from a 0.0 to 1.0 value, assign first third of brightness (0 to $mv)
+# to the top of a stack, the second third to the middle, and the last
+# third to the bottom.
+# This is called often, so results are cached in a global memo.
+sub stack_from_value {
+  my $v = shift;
+  my $value = $v * $mv * 3;
+  my $round;
+  my @ret;
+
+  # check cache
+  if(defined($stackmemo{$value})) {
+    @ret = @{$stackmemo{$value}};
+    return @ret;
+  }
+
+  # nope, need to calculate
+  if($value < $mv) {
+    $round = sprintf("%0.f", $value);
+    @ret   = ($round, 0, 0);
+  } else {
+    $value -= $mv;
+
+    if($value < $mv) {
+      $round = sprintf("%0.f", $value);
+      @ret   = ($mv, $round, 0);
+    } else {
+      if($value < $mv) {
+	$round = sprintf("%0.f", $value);
+	@ret   = ($mv, $mv, $round);
+      } else {
+	@ret   = ($mv, $mv, $mv);
+      }
+    }
+  }
+
+  # save in cache
+  $stackmemo{$value} = \@ret;
+  return @ret;
+} # stack_from_value
+
+

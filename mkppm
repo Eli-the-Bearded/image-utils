@@ -1,0 +1,16 @@
+#/bin/ksh
+# turn common formats into similarly named ppm files
+
+for f ; do 
+  case "$f" in
+    *.[jJ][pP]2)        jpeg2000toppm "$f" > ${f%.[jJ][pP]2}.ppm ;;
+    *.[jJ][pP][gG])     djpeg         "$f" > ${f%.[jJ][pP][gG]}.ppm ;;
+    *.[jJ][pP][eE][gG]) djpeg         "$f" > ${f%.[jJ][pP][eE][gG]}.ppm ;;
+    *.[gG][iI][fF])     giftopnm      "$f" > ${f%.[gG][iI][fF]}.ppm ;;
+    *.[tT][iI][fF])     tifftopnm     "$f" > ${f%.[tT][iI][fF]}.ppm ;;
+    *.[tT][iI][fF][fF]) tifftopnm     "$f" > ${f%.[tT][iI][fF][fF]}.ppm ;;
+    *.[bB][mM][pP])     bmptopnm      "$f" > ${f%.[bB][mM][pP]}.ppm ;;
+    *.[xX][wW][dD])     xwdtopnm      "$f" > ${f%.[xX][wW][dD]}.ppm ;;
+    *) echo "$0: no rule for files like $f" ;;
+  esac
+done

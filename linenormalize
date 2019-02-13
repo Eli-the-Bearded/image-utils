@@ -1,0 +1,192 @@
+#!/usr/bin/perl -w
+# Take a PNM (only PGM and PPM make sense) image and normalize
+# the brightness line-by-line.
+#
+# 29 Mar 2012
+use strict;
+use Image::PBMlib;
+use vars qw( $filein $fileout %info @pixels 
+	   );
+
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+readpnmfile( \*STDIN, \%info, \@pixels, 'float' );
+
+if(length($info{error})) {
+  die "$0: input image: $info{error}\n";
+}
+
+if($info{bgp} eq 'b') {
+  die "$0: input is bitmap, cannot normalize\n";
+}
+
+process(\%info, \@pixels);
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+
+writepnmfile( \*STDOUT, \%info, \@pixels );
+exit;
+
+sub process {
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my $n;
+  my $m = $$i{height};
+  my $t = $$i{bgp};
+
+  for ($n = 0; $n < $m; $n ++) {
+    if($t eq 'p') {
+      p_norm($$p[$n]);
+    } else {
+      g_norm($$p[$n]);
+    }
+  }
+} # end &process 
+
+sub g_norm {
+  my $r = shift;	# array ref to 1d array
+
+  my $min = 1.0;
+  my $max = 0.0;
+  my $v;
+  my $c;
+  my $x;
+
+  for $v (@{$r}) {
+    chop($v);	# remove ,
+    if($v < $min) { $min = $v; }
+    if($v > $max) { $max = $v; }
+  }
+
+  # this is the size of the range of values
+  $x = $max - $min;
+
+
+  $c = comparefloatval(1.0, $x);
+  if($c <= 0) { return; }	# nothing to do
+
+  # this is how much to scale the values
+  $x = 1 / $x;
+
+  for $v (@{$r}) {
+    $c = comparefloatval($min, $v);
+    if($c >= 0) { $v = '0.0,'; next; }
+
+    $c = comparefloatval($max, $v);
+    if($c <= 0) { $v = '1.0,'; next; }
+
+    $v = sprintf('%f,', ( $v - $min ) * $x );
+  }
+
+} # end &g_norm 
+
+sub p_norm {
+  my $r = shift;	# array ref to 1d array
+
+  my @rgb;
+  my @min = (1.0, 1.0, 1.0);
+  my @max = (0.0, 0.0, 0.0);
+  my $v;
+  my @x;
+  my $c;
+  my $h;
+
+  for $v (@{$r}) {
+    @rgb = explodetriple($v);
+    chop(@rgb);	# remove ,
+    for $h (0,1,2) {
+      if($rgb[$h] < $min[$h]) { $min[$h] = $rgb[$h]; }
+      if($rgb[$h] > $max[$h]) { $max[$h] = $rgb[$h]; }
+    }
+  }
+
+  # these are the size of the ranges of values
+  for $h (0,1,2) {
+    $x[$h] = $max[$h] - $min[$h];
+  }
+
+  $c = comparefloatval(1.0, $x[0]);
+  if($c <= 0) {
+    $c = comparefloatval(1.0, $x[1]);
+    if($c <= 0) {
+      $c = comparefloatval(1.0, $x[2]);
+      if($c <= 0) {
+        return; # nothing to do
+      }
+    }
+  }
+
+  # this is how much to scale the values
+  for $h (0,1,2) {
+    $x[$h] = 1 / $x[$h];
+  }
+
+  for $v (@{$r}) {
+    @rgb = explodetriple($v);
+    chop(@rgb);	# remove ,
+
+    for $h (0,1,2) {
+      $c = comparefloatval($min[$h], $rgb[$h]);
+      if($c >= 0) { $rgb[$h] = '0.0,'; next; }
+
+      $c = comparefloatval($max[$h], $rgb[$h]);
+      if($c <= 0) { $rgb[$h] = '1.0,'; next; }
+
+      $rgb[$h] = sprintf('%f,', ( $rgb[$h] - $min[$h] ) * $x[$h] );
+    } # for $h
+
+    $v = join('', @rgb);	# third (trailing) comma okay
+  } # for v
+
+} # end &p_norm 
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+	linenormalize < INPUT > OUTPUT
+	linenormalize INPUT > OUTPUT
+	linenormalize INPUT OUTPUT
+END_usage
+
+  exit($exit);
+} # end &usage
+
+__END__

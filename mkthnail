@@ -1,0 +1,195 @@
+#!/usr/bin/perl -w
+# Makes PBM/PGM/PPM thumbnails from given files
+# Benjamin Elijah Griffin	1 Dec 1999
+use strict;
+use integer;
+use vars qw( $height $width $insize $inmax $max $fit $id $tag );
+
+sub renameppm($$);
+sub usage($);
+
+$id = $0;
+$id =~ s:.*/::;
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  my $arg = $1; shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+  } elsif ($arg eq 'w' or $arg eq '-width') {
+    $width = shift;
+  } elsif ($arg eq 'h' or $arg eq '-height') {
+    $height = shift;
+  } elsif ($arg eq 'm' or $arg eq '-max') {
+    $max = shift;
+  } elsif ($arg eq 'f' or $arg eq '-fit') {
+    $fit = 1;
+  }
+}
+
+if (!defined($width) and !defined($height) and !defined($max)) {
+  $max = 40;
+  if(defined($fit)) {
+    die "$id: cannot use fit without width or height\n";
+  }
+}
+
+if (defined($width) and defined($height) and !defined($fit)) {
+  $tag="${width}x${height}";
+} elsif (defined($width) and !defined($fit)) {
+  $tag="w${width}";
+} elsif (defined($height) and !defined($fit)) {
+  $tag="h${height}";
+} elsif (defined($max)) {
+  $tag="m${max}";
+}
+
+my $file;
+while (defined($file = shift)) {
+  my $outmax = $max;
+  my $outx = $width;
+  my $outy = $height;
+  my $outfile = $file;
+  my $type;
+  my $tool = 'anytopnm';
+
+  if (! -f $file) {
+    warn "$id: $file not found\n";
+    next;
+  }
+
+  if ($outfile =~ s/\.(gif|jpe?g|png|tiff?|p[bgp]m)$//i) {
+    $type = lc($1);
+    if ($type eq q/gif/) {
+      $tool = 'giftopnm';
+    } elsif ($type =~ /jpe?g/) {
+      $tool = 'djpeg';
+    } elsif ($type eq q/png/) {
+      $tool = 'pngtopnm';
+    } elsif ($type =~ /tif+/) {
+      $tool = 'tifftopnm';
+    } elsif ($type =~ /p[bgp]m/) {
+      $tool = 'cat';
+    }
+  }
+
+  if (defined($fit)) {
+    my $inx;
+    my $iny;
+    $_ = `$tool "$file" |pnminfo --dimensions 2>&1`;
+    if(/(\d+)\sx\s(\d+)\s*$/) {
+      $inx = $1;
+      $iny = $2;
+    } else {
+      warn "$id: $file: can't get dimensions\n";
+      next;
+    }
+
+    if(defined($outx) and defined($outy)) {
+      $tag = "m${outx}xm$outy";
+      `$tool "$file" | pnmscale -xysize $outx $outy > "${outfile}-${tag}.ppm" 2>/dev/null`;
+    } else {
+      if(defined($outx)) {
+        if($outx > $inx) {
+	  $tag = 'noresize';
+	  `$tool "$file" > "${outfile}-${tag}.ppm" 2>/dev/null`;
+	} else {
+	  $tag = "mx${outx}";
+	  `$tool "$file" | pnmscale -xsize $outx > "${outfile}-${tag}.ppm" 2>/dev/null`;
+	}
+      } elsif (defined($outy)) {
+        if($outy > $iny) {
+	  $tag = 'noresize';
+	  `$tool "$file" > "${outfile}-${tag}.ppm" 2>/dev/null`;
+	} else {
+	  $tag = "my${outy}";
+	  `$tool "$file" | pnmscale -ysize $outy > "${outfile}-${tag}.ppm" 2>/dev/null`;
+	}
+      } else {
+	die "$id: internal error, fit mode without width or height\n";
+      }
+    }
+
+    renameppm("${outfile}-${tag}.ppm", $outfile);
+
+  } # fit mode
+
+  elsif (defined($max)) {
+    $_ = `$tool "$file" |pnminfo --largest 2>&1`;
+    if (/^([xy])size\s+(\d+)/) {
+      $inmax = $1;
+      $insize = $2;
+    } else {
+      warn "$id: $file: can't get dimensions\n";
+      next;
+    }
+    if ($insize <= $max) {
+      $outmax = $insize;
+    }
+
+    `$tool "$file" | pnmscale -${inmax}size $outmax > "${outfile}-${tag}.ppm" 2>/dev/null`;
+
+    renameppm("${outfile}-${tag}.ppm", $outfile);
+
+  } # defined $max
+
+  else
+
+  { # normal scaling
+    my $args = '';
+
+    if ($outx) {
+      $args .= " -xsize $outx";
+    }
+    if ($outy) {
+      $args .= " -ysize $outy";
+    }
+
+    `$tool "$file" | pnmscale $args > "${outfile}-${tag}.ppm" 2>/dev/null`;
+    print STDERR "${outfile}-${tag}.ppm done\n";
+  } # normal scaling
+ 
+}
+
+exit(0);
+
+sub renameppm($$) {
+  my $file   = shift;
+  my $base   = shift;
+  my $newtag;
+
+  if(open(TMPPPM, "< $file")) {
+    $newtag = <TMPPPM>; # P6
+    $newtag = <TMPPPM>; # width and height
+    close TMPPPM;
+    $newtag =~ s/^/w/;
+    $newtag =~ s/ /-h/;
+    $newtag =~ s/\s+//g;
+    rename $file, "${base}-${newtag}.ppm";
+    print STDERR "${base}-${newtag}.ppm done\n";
+  } else {
+    print STDERR "$file done, but can't open to rename.\n";
+  }
+
+} # sub renameppm
+
+sub usage ($) {
+  my $exit = shift;
+
+  print "$id: usage\n", <<USAGEnotes;
+  	mkthnail [options] file [file ...]
+
+Options:
+
+		--help		print this message
+	-f      --fit           resizes proportionaly to fit height or width
+	-h N	--height N	output height
+	-w N	--width	 N	output width
+	-m N	--max	 N	like fit for a square size N
+
+The output is in the form of ppm files.
+If height or width is specified, max is ignored.
+The fit option needs needs height and/or width specified.
+USAGEnotes
+
+  exit($exit);
+} # end &usage 

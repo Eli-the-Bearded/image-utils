@@ -1,0 +1,94 @@
+#!/bin/ksh
+
+
+usage () {
+  echo "video-explode usage:"
+  echo "  video-explode [options] OUTPUTDIR"
+  echo ""
+  echo "Explode the MOVIE.FILE into individual jpeg frames in OUTPUTDIR"
+  echo "The OUTPUTDIR will be created if it does not exist."
+  echo ""
+  echo "Options:"
+  echo "  -ss TIME			start at TIME"
+  echo "  -et TIME   -endpos   TIME	copy to TIME of movie"
+  echo "  -td TIME   -duration TIME	copy TIME of movie"
+  echo "  -sub FILE			use subtitles in FILE"
+  echo "  -i  INFILE			movie input"
+  exit
+}
+
+duration=
+outdir=
+DURATION=
+START=
+INFILE=
+SUB=
+loop=yes
+while [ $loop = yes ] ; do
+  case "X$1" in
+     X-sub)
+           shift
+           srt="$1"
+	   shift
+	   SUB="-ass -vf ass -sub $srt"
+	   ;;
+
+     X-ss)
+           shift
+           time="$1"
+	   shift
+	   START="-ss $time"
+	   ;;
+
+     X-endpos|X-et)
+           shift
+	   DURATION="-endpos $1"
+	   shift
+	   ;;
+
+     X-duration|X-td)
+           shift
+           duration="$1"
+	   shift
+	   ;;
+
+     X-input|X-i|X-in)
+           shift
+           INFILE="$1"
+	   shift
+	   ;;
+
+     X-o|X-out*) shift
+                 outdir="$1"
+		 shift
+		 ;;
+
+     X-*) usage ;;
+
+     X*) loop=no ;;
+  esac
+done
+
+if [ "X$outdir" = X ] ; then
+  outdir="$1"
+fi
+
+if [ "X$DURATION" = X ] ; then
+  if [ "X$duration" != X ] ; then
+    if [ "X$time" = X ] ; then
+      time=0
+    fi
+    end=$(( $time + $duration ))
+    DURATION="-endpos $end"
+  fi
+fi
+
+if [ "X$outdir" = X ] ; then echo "$0: Not enough args"    ; usage ; fi
+if [ ! -f "$INFILE" ] ; then echo "$0: Not a file: $INFILE" ; usage ; fi
+if [ ! -d "$outdir" ] ; then mkdir "$outdir" ; fi
+
+echo mplayer $START $DURATION $SUB -zoom -nosound -vo "jpeg:outdir=$outdir" "$INFILE"
+mplayer $START $DURATION $sub -zoom -nosound -vo "jpeg:outdir=$outdir" "$INFILE"
+
+printf "%s: " "$outdir"
+ls -1 "$outdir" | egrep "[0-9]{8}[.]jpg" | wc -l

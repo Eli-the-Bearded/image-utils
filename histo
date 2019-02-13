@@ -1,0 +1,116 @@
+#!/usr/bin/perl -w
+# Perform histogram analysis of image files. Good for guessing
+# if an image will work better as a GIF or JPG. Also tries to
+# figure out if the file is basically grayscale or not.
+#
+# Benjamin Elijah Griffin	written	24 August 1999
+#				revised 24 September 1999
+use strict;
+
+my $graythres = 16;
+
+sub s {
+  (shift) > 1 ?'s':' ';
+}
+
+my $file;
+foreach $file (@ARGV) {
+  my $count;
+  my %freq;
+  my $total = 0;
+  my $lines = 0;
+  my $grays = 0;
+  my $neargrays = 0;
+
+  if($file =~ /jpe?g$/i) {
+    open(STDIN, "djpeg $file |ppmhist |") or die "Can't do histo of $file: $!\n";
+  } elsif($file =~ /gif$/i) {
+    open(STDIN, "giftopnm $file |ppmhist |") or die "Can't do histo of $file: $!\n";
+  } else {
+    open(STDIN, "anytopnm $file |ppmhist |") or die "Can't do histo of $file: $!\n";
+  }
+
+  while(<STDIN>) {
+    next if /\s*r\s*g\s*b|^[\s-]*$/;
+    $lines ++;
+    ($count) = /\s(\d+)\s*$/;
+    $total += $count;
+
+    my $len = 10**(length("$count")-1);
+    $freq{$len} ||= 0;
+    $freq{$len} += 1;
+
+    my ($r,$g,$b) = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+/;
+    
+    if (($r == $g) and ($g == $b)) {
+      $grays++;
+    } elsif ( (abs(($r - $g)) < $graythres) and (abs(($b - $g)) < $graythres) ) {
+      $neargrays ++;
+    }
+  }
+
+  my @a = sort { $b <=> $a } keys %freq;
+
+  my $S = length("$a[0]");
+  $S = length("$total") if $S < length("$total");
+  $S = 3 if $S < 3;
+
+  print "Histogram summary of $file\n";
+  printf("%${S}d pixel%1s with %${S}d      color%1s\n",
+	  $total,&s($total),$lines,&s($lines));
+
+  printf("%${S}s    of which %${S}d      gray%1s\n",
+	  ' ',$grays,&s($grays)) if $grays;
+
+  printf("%${S}s             %${S}d      near gray%1s",
+	  ' ',$neargrays,&s($neargrays)) if $neargrays;
+
+  if ($grays and $neargrays) {
+    printf("  %${S}d cummulative\n", $grays+$neargrays);
+  } else {
+    print "\n";
+  }
+
+  my $subtotal = 0;
+
+  foreach (@a) {
+    $subtotal += $freq{$_};
+    printf("%${S}d color%1s with %${S}d\'s of pixels      %${S}d cummulative\n",
+	 $freq{$_}, &s($freq{$_}), $_, $subtotal);
+  }
+
+}
+__END__
+:+,$ w ! %
+ r   g   b 	lum	count
+ --- --- ---	---	-----
+ 255 255 255	255	3000
+ 153 153 153	153	179
+   0   0   0	0	89
+ 204 255 153	228	49
+  51  51   0	45	44
+ 204 255 102	222	41
+ 102 102   0	90	30
+ 153 204  51	171	21
+  51  51  51	51	17
+ 255 255 153	243	16
+ 153 204 102	177	15
+   0  51   0	30	13
+ 102 153   0	120	11
+ 153 153  51	141	10
+ 204 204 102	192	10
+ 102 102  51	96	10
+ 204 204  51	187	9
+  51 102   0	75	8
+ 102 102 102	102	7
+ 153 153 102	147	6
+ 153 255  51	201	4
+ 153 153   0	136	4
+ 102 102 153	108	3
+ 204 255  51	216	2
+  51   0   0	15	1
+ 102 153 102	132	1
+ 153 255 102	207	1
+ 153 102 153	123	1
+ 153 102 102	117	1
+ 102 153 153	138	1

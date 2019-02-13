@@ -1,0 +1,32 @@
+#!/bin/ksh
+# Usage:	jpeg2000toppm image.jp2 > image.ppm
+#
+# Use "-" to read from stdin. Verbose on stderr.
+#
+# Requires j2k_to_image from openjpeg-tools package.
+#
+# 13 Jan 2019			Benjamin Elijah Griffin
+tmpfile_out=/tmp/jp2-$$.ppm
+tmpfile_in=/tmp/jp2-$$.jp2
+
+in="$1"
+
+if [ "X$in" = "X" ] ; then in=- ; fi
+if [ "X$in" != "X-" ] ; then
+  if [ ! -f "$in" ] ; then
+    echo "$0: $in not a file\n"
+    exit 2
+  fi
+else
+  cat > $tmpfile_in
+  in=$tmpfile_in
+fi
+
+# j2k_to_image sends informational output to BOTH stderr and stdout.
+# Not very suitable for a *toppm tool likely to be used in a pipeline.
+j2k_to_image -i "$in" -o $tmpfile_out 1>&2
+rc=$?
+
+cat $tmpfile_out
+rm -f $tmpfile_out $tmpfile_in
+exit $rc

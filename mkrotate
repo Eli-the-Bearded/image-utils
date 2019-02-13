@@ -1,0 +1,333 @@
+#!/usr/bin/perl -w
+# Make sets of rotated ppm images using pnmrotate and pnmflip.
+# 	pnmrotate works accurately between -45 and 45 deg
+# 	pnmflip works accurately for 90, 180, and 270 deg
+# Combined, any angle can be made accurately. This does the
+# combining, and can calculate angles for various even groupings,
+# like ten in a circle.
+#
+# Usage:
+# 	mkrotate [options] file ...
+#
+# The files can be any format handled by anytopnm
+# New output files will be made.
+#
+# Options:
+#	-v         --verbose         print commands before executing
+#	-a         --aliased         use -noantialias with pnmrotate
+#       -t         --savetmp         do not delete tmp files
+#       -m         --mask            use a mask to make new areas white
+#       -c         --crop            run through pnmcrop
+#       -e N       --even N          evenly spread N in a circle
+#       -d D,D,... --degrees D,D,... use specified angles
+#       -l A,X1,Y1,X2,Y2
+#                  --line A,X1,Y1,X2,Y2
+#                                    the line through (X1,Y1),(X2,Y2) should
+#                                    be at angle A relative to the X axis;
+#                                    angle A can be a real number
+#	           --help            display a help message
+#
+# One of -e (--even), -d (--degrees), or -l (--line) must be specified for
+# anything to be done.
+#
+# 16 Mar 2004	Benjamin Elijah Griffin
+use strict;
+use vars qw( $set $alias $verbose $in $save $mask $crop
+             $out $suf $savetmp $pipe $tmp $err $deg @angles
+	     $xy $blk $blktmp $fixpipe
+	     $lineargs $adjust $X1 $Y1 $X2 $Y2 $sidea $sideb $sidec $angleC
+           );
+
+$alias = '';
+$set = '';
+$err = 0;
+$verbose = 0;
+$savetmp = 0;
+$mask = '';
+$crop = '';
+
+sub mysystem ($) {
+  my $command = shift;
+  
+  if ($verbose) { print "$command\n"; }
+  system($command);
+} # end &mysystem
+
+sub myqx ($) {
+  my $command = shift;
+  
+  if ($verbose) { print "$command\n"; }
+  qx($command);
+} # end &myqx
+
+sub deltmps() {
+  if (!$savetmp) {
+    if ($verbose) { print "rm -f '$tmp' '$blk' '$blktmp'\n"; }
+    unlink($tmp, $blk, $blktmp );
+  }
+} # end &deltmps
+
+while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
+    if (($ARGV[0] eq '-a') or ($ARGV[0] eq '--aliased'))  {
+      $alias = "-noantialias";
+      shift;
+
+    } elsif (($ARGV[0] eq '-c') or ($ARGV[0] eq '--crop'))  {
+      $crop = "|pnmcrop";
+      shift;
+
+    } elsif (($ARGV[0] eq '-t') or ($ARGV[0] eq '--savetmp'))  {
+      $savetmp ++;
+      shift;
+
+    } elsif (($ARGV[0] eq '-m') or ($ARGV[0] eq '--mask'))  {
+      $mask = 'set-later';
+      shift;
+
+    } elsif (($ARGV[0] eq '-v') or ($ARGV[0] eq '--verbose'))  {
+      $verbose ++;
+      shift;
+
+    } elsif (($ARGV[0] eq '-d') or ($ARGV[0] eq '--degrees'))  {
+      shift;
+      $set = shift;
+      if(!defined($set) or $set !~ /^\d+(,\d+)*$/) {
+        warn "$0: misuse of -d (--degrees) option; --help for help\n";
+	$err ++;
+      }
+      @angles = split(/,/, $set);
+      $set = ""; # won't use in output filename(s)
+
+    } elsif (($ARGV[0] eq '-e') or ($ARGV[0] eq '--even'))  {
+      shift;
+      $set = shift;
+      if(!defined($set) or $set !~ /^\d+$/) {
+        warn "$0: misuse of -e (--even) option; --help for help\n";
+	$err ++;
+      }
+      for ($deg = 0; $deg < 360; $deg += (360 / $set)) {
+        push(@angles, $deg);
+      }
+      # leave $set set for use in output filename(s)
+
+    } elsif (($ARGV[0] eq '-l') or ($ARGV[0] eq '--line'))  {
+      shift;
+      $set = shift;
+      if(!defined($set) or $set !~ /^[\d.]+,\d+,\d+,\d+,\d+$/) {
+        warn "$0: misuse of -l (--line) option; --help for help\n";
+	$err ++;
+      }
+      ($adjust,$X1,$Y1,$X2,$Y2) = split(/,/,$set);
+      eval 'use Math::Trig;';
+      if ($@) {
+        die "$0: Can't use Math::Trig: $@\n-l (--line) mode unavailable.\n";
+      }
+
+      # Sides are named with lowercase letters, angles with Uppercase.
+      #
+      #                . X2,Y2
+      #               /|
+      #              /B|
+      #             /  |
+      #         a  /   |
+      #           /    |  c
+      #          /     |
+      #         /      |
+      #        / C    A|
+      # X1,Y1 '--------' X2,Y1
+      #            b
+      #
+      # length of any side (point1_X, point1_Y) to (point2_X, point2_Y) is
+      # sqrt( ( point1_X - point2_X )^2 + ( point1_Y - point2_Y )^2 )
+      #
+      # This is easy to simplify when two lines are parallel to the axes.
+
+      $sidea = sqrt( ($X1-$X2)*($X1-$X2) + ($Y1-$Y2)*($Y1-$Y2) );
+      $sideb = abs( $X1 - $X2 );
+      $sidec = abs( $Y1 - $Y2 );
+
+      # Law of Cosines: c^2 = a^2 + b^2 - 2 * a * b * cos(C)
+      # =>              c^2 - (a^2 + b^2) = -2 * a * b * cos(C)
+      # =>              (c^2 - (a^2 + b^2)) / (-2 * a * b) = cos(C)
+      # =>              arccosine(c^2 - (a^2 + b^2)) / (-2 * a * b)) = C
+      $angleC = acos( ($sidec * $sidec - ($sidea * $sidea + $sideb * $sideb))
+		      / ( -2 * $sidea * $sideb) );
+
+      $angleC = rad2deg($angleC);
+      push(@angles, ($angleC + $adjust));
+
+      $set = undef;
+      printf STDERR "(X1,Y1),(X2,Y2): ($X1,$Y1),($X2,$Y2); angle adjust $adjust\n";
+      printf STDERR "angle C is $angleC, will rotate to $angles[-1]\n";
+
+    } elsif($ARGV[0] eq '--help') {
+      print << "USAGEmessage";
+Usage:
+	mkrotate [options] file ...
+
+The files can be any format handled by anytopnm
+New files will be created.
+
+Options:
+      -a         --aliased         use -noantialias with pnmrotate
+      -v         --verbose         print commands before running
+      -t         --savetmp         do not delete tmp files
+      -m         --mask            use a mask to make new areas white
+      -c         --crop            run through pnmcrop
+      -e N       --even N          evenly spread N in a circle
+      -d D,D,... --degrees D,D,... use specified angles
+      -l A,LINE  --line A,LINE     make line be at angle A (see below)
+                 --help            display a help message
+
+One of -e (--even), -d (--degrees), or -l (--line) must be specified for
+anything to be done.
+
+The -l (--line) argument takes a real (or integer) angle and two
+coordinate pairs: A,X1,Y1,X2,Y2. It rotates the image so the line
+specified is at angle A relative to the X axis. For accuracy, choose
+points as distant as possible on the line. An angle of 0 makes the
+line parallel to the axis, an angle of 90 makes it perpendicular,
+and an angle of 180 would be parallel and upside down.
+USAGEmessage
+      exit 2;
+    } else {
+      warn "$0: unknown option $ARGV[0]; --help for help\n";
+      $err ++;
+      shift;
+    }
+} # while processing options
+
+if($err) {
+  exit(2);
+}
+
+if(!defined($ARGV[0])) {
+  die "$0: no files specified\n";
+}
+
+if(!defined($angles[0])) {
+  die "$0: no angles specified\n";
+}
+
+for $in (@ARGV) {
+  $save = $in;
+
+  if( $in =~ s/\.jpe?g$//i ) {
+    $pipe = "djpeg '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.gif$//i ) {
+    $pipe = "giftopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.tiff?$//i ) {
+    $pipe = "tifftopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.bmp$//i ) {
+    $pipe = "bmptoppm '$save' ";
+    $suf = ".ppm";
+
+  } elsif( $in =~ s/(\.p[bgpn]m)$//i ) {
+    $pipe = "cat '$save' ";
+    $suf = $1;
+
+  } elsif( $in =~ s/(\.p[bgpn]m).gz$//i ) {
+    $pipe = "zcat '$save' ";
+    $suf = $1;
+
+  } elsif( $in =~ s/(\.p[bgpn]m).bz2$//i ) {
+    $pipe = "bzcat '$save' ";
+    $suf = $1;
+  } else {
+
+    $pipe = "anytopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+  }
+
+  $tmp = "$in.tmp$suf";
+  $blk = "$in.block.pbm";
+  $blktmp = "$in.blocktmp.pgm";
+  $pipe .= "> '$tmp'";
+
+  mysystem($pipe);
+  
+  if($mask) {
+    $pipe = "pnminfo -d - < '$tmp'";
+    $xy = myqx($pipe);
+    if($xy !~ /\d\s*x\s*\d/) {
+      warn "$0: can't get size of '$tmp'\n";
+      &deltmps();
+      next;
+    }
+    $xy =~ s/x/ /;
+    chomp($xy);
+
+    $pipe = "pbmmake -white $xy > '$blk'";
+    mysystem($pipe);
+
+    # set the mask command properly
+    $mask = "|pnmarith -add - '$blktmp' 2>/dev/null";
+  }
+
+  for $deg (@angles) {
+    $out = $in;
+    if($set) { $out .= "-e$set"; }
+    $out .= sprintf("-d%03d", int($deg));
+    $out .= $suf;
+    
+#   print STDERR "# $save, angle $deg\n";
+
+    $fixpipe = '';
+
+    if ($deg > 315) {
+      $deg = $deg - 360;
+      $fixpipe = "pnmrotate $alias $deg '$blk' 2>/dev/null |pnminvert > '$blktmp'";
+      $pipe = "< '$tmp' pnmrotate $alias $deg $mask $crop > '$out'";
+
+    } elsif ($deg == 270) {
+      $pipe = "< '$tmp' pnmflip -r270 > '$out'";
+
+    } elsif ($deg > 225) {
+      $deg = $deg - 270;
+      $fixpipe = "pnmflip -r270 '$blk' |pnmrotate $alias $deg 2>/dev/null |pnminvert > '$blktmp'";
+      $pipe = "pnmflip -r270 '$tmp' |pnmrotate $alias $deg $mask $crop > '$out'";
+
+    } elsif ($deg == 180) {
+      $pipe = "< '$tmp' pnmflip -r180 > '$out'";
+
+    } elsif ($deg > 135) {
+      $deg = $deg - 180 ;
+      $fixpipe = "pnmflip -r180 '$blk' |pnmrotate $alias $deg 2>/dev/null |pnminvert > '$blktmp'";
+      $pipe = "pnmflip -r180 '$tmp' |pnmrotate $alias $deg $mask $crop > '$out'";
+
+    } elsif ($deg == 90) {
+      $pipe = "pnmflip -r90 '$tmp' > '$out'";
+
+    } elsif ($deg > 45) {
+      $deg = $deg - 90 ;
+      $fixpipe = "pnmflip -r90 '$blk' |pnmrotate $alias $deg 2>/dev/null |pnminvert > '$blktmp'";
+      $pipe = "pnmflip -r90 '$tmp' |pnmrotate $alias $deg $mask $crop > '$out'";
+
+    } elsif ($deg == 0) {
+      # cat is the pnm no-op
+      $pipe = "cat '$tmp' > '$out'";
+
+    } else { # $deg > 0 && $deg <= 45
+      $fixpipe = "pnmrotate $alias $deg '$blk' 2>/dev/null |pnminvert > '$blktmp'";
+      $pipe = "pnmrotate $alias $deg '$tmp' 2>/dev/null $mask $crop > '$out'";
+
+    }
+
+    if($mask and $fixpipe) {
+      mysystem($fixpipe);
+    }
+    mysystem($pipe);
+    
+  } # for angle
+
+  &deltmps();
+
+} # for file in
+
+

@@ -1,0 +1,291 @@
+#!/usr/bin/perl -w
+# histochart by Benjamin Elijah Griffin		21 Feb 2012
+# Friendly wrapper around some generic tools to create a color usage
+# swatch sheet for an image.
+# The input image is run through: anytopnm | ppmquant | ppmhist
+# The output image is created in FIG format (native to xfig) and
+# optionally converted to JPEG with fig2dev (which uses ghostscript
+# and ps2pdf to create the image).
+use strict;
+use vars qw ( $in $stype $otype $uselabels $label $line
+	      %colors $r $g $b $l $v $color $id $qv
+	      $n $row $col $per_row $per_col
+	      $this_left $this_right $this_top $this_bot
+	      $label_left $label_bot $label_tall $label_wide
+	      $content_wide $content_tall
+	      $document @sortcolors $color_com $color_set
+	      $top_margin $left_margin $box_w $box_h $box_bot_pad $box_right_pad
+            );
+
+$stype = 'l';
+$otype = 'f';
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-+(.*)/) {
+  shift;
+  $_ = $1;
+
+  if(/^vol/) {
+    $stype = 'v';
+    next;
+  }
+  if(/^lum/) {
+    $stype = 'l';
+    next;
+  }
+  if(/^col/) {
+    $stype = 'c';
+    next;
+  }
+  if(/^lab/) {
+    $uselabels = 1;
+    next;
+  }
+  if(/^nol/) {
+    $uselabels = 0;
+    next;
+  }
+  if(/^x?fig/) {
+    $otype = 'f';
+    next;
+  }
+  if(/^jpe?g/) {
+    $otype = 'j';
+    next;
+  }
+
+  if(/^h(elp)?$/) {
+    print <<"HistoUsage";
+$0 usage:
+  histochart [ options ] inputimage > outputimage
+
+Options:
+  --vol		sort colors by volume of usage
+  --lum		sort colors by luminence value (default)
+  --col		sort colors by color (alphabetic sort of hex RRGGBB)
+
+  --lab		label color boxes
+  --nol		no color box labels (default)
+
+  --fig		fig file output (xfig image format 3.2) (default)
+  --jpg		jpeg file output (fig image converted with fig2dev)
+
+HistoUsage
+    exit 0;
+  }
+
+  warn "$0: unrecognized option: -$_\n";
+}
+
+$in = shift;
+
+if(!defined($in)) {
+  warn "$0: reading image from stdin\n";
+  $in = '-';
+}
+
+$per_row = 8;
+$per_col = 16;
+$qv      = $per_row * $per_col;
+
+if(!open(HISTO, " anytopnm $in | ppmquant $qv | ppmhist |")) {
+  die "$0: anytopnm | ppmquant | ppmhist pipe failed: $!\n";
+}
+
+# at 1200 xfig units per inch a 8.5x11 page is 10200 x 13200
+$top_margin    = 1200;	# 1 inch
+$left_margin   =  900;	# 3/4 inch
+
+$content_wide  = 10200 - $left_margin - $left_margin;
+$content_tall  = 13200 - $top_margin  - $top_margin;
+
+$box_w         =  900;	# 3/4 inch
+$box_right_pad = int( ($content_wide - ($box_w * $per_row) ) / ($per_row - 1) );
+# old right pad: 187; content wide (10200 - 900 - 600) / 8 = 1087; this is 1087 - $box_w
+
+$label_tall    = 135; # approximate size for 1 line in 14pt
+$label_wide    = 540; # approximate size for 6 chars in 14pt
+
+$box_h         =  600;  # 1/2 inch
+if($uselabels) {
+  $box_h       =  $box_h - int(1.5 * $label_tall);
+}
+$box_bot_pad   =  int( ($content_tall - ($box_h * $per_col) ) / ($per_col - 1) );
+
+# old bot pad: 275;  # content tall (13200 - 1200 - 1200) / 16 = 675
+
+$document = <<'EndDocHeader';
+#FIG 3.2  Produced by histochart 1.0
+# orientation
+Portrait
+# justification
+Center
+# units
+Inches
+# papersize
+Letter      
+# magnification
+100.00
+# single/multiple-page
+Single
+# transparent color: -1 background
+-1
+# resolution (parts per inch) coord_system 2 (0,0 is upper left)
+1200 2
+# object type 0: custom colors "0 id #RRGGBB" (-2 to 31 are xfig system colors)
+EndDocHeader
+
+#    r     g     b         lum     count
+# ----- ----- -----      -----   -------
+#    70    64    66         66    122541
+#   136   124   118        127    111689
+# ...
+
+$_ = <HISTO>;	# column header
+if(!defined($_)) {
+  die "$0: no output from ppmhist\n";
+}
+if(!/^\s*r\s+g\s+b\s+lum\s+count\s*/i) {
+  die "$0: unrecognized output format from ppmhist\n";
+}
+$_ = <HISTO>;	# line of hyphens and spaces
+
+$n = 0;
+$id = 32;
+$color_com = '';
+$color_set = '';
+
+while(<HISTO>) {
+  if(($r,$g,$b,$l,$v) = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s/) {
+    $color = sprintf("%02X%02X%02X", $r, $g, $b);
+    $colors{$color} = [$id, $l, $v];
+
+    # xfig 3.2.5 (and probably over versions) tries to save comments, but
+    # fails if there are more than 100 lines per object. All color comments
+    # count towards one object.
+    # $color_com = "# color ($r $g $b = $color) lum $l, count $v\n";
+    $color_set .= $color_com . "0 $id #$color\n";
+
+    $n ++;
+    $id ++;
+  }
+}
+
+$document .= $color_set;
+
+if($stype eq 'c') { # sorted by colors
+  @sortcolors = sort { $a cmp $b } (keys %colors);
+}
+
+if($stype eq 'v') { # sorted by volume
+  @sortcolors = sort { $colors{$a}[2] <=> $colors{$b}[2] } (keys %colors);
+}
+
+if($stype eq 'l') { # sorted by lum
+  @sortcolors = sort { $colors{$a}[1] <=> $colors{$b}[1] } (keys %colors);
+}
+
+$document .= <<'BoxComment';
+# object type 2 subtype 2: box
+# 2 2 line_style thickness pen_color fill_color depth not_used area_fill
+#   style_val join_style cap_style radius fwd_arrow bck_arrow npoints
+# line_style 0 = Solid
+# thickness  0 = 0/80th inch
+# pen_color  0 = default
+# fill_color (color id)
+# depth     99 (range of 0 to 999)
+# not_used  -1
+# area_fill 20 = full saturation
+# style_val 0.0 (only applicable to dashed line)
+# join_style 0 (not applicable to box)
+# cap_style 0 (not applicable to box)
+# radius    -1 (not applicable to box)
+# fwd_arrow 0 (not applicable to box)
+# bck_arrow 0 (not applicable to box)
+# npoints   5 (first and last point are same)
+#  x_1 y_1  point pairs in xfig units
+# ...
+#  x_n y_n  point pairs in xfig units
+#
+BoxComment
+
+if($uselabels) {
+$document .= <<'LabelComment';
+# object type 4 text sub_type 1: Center justified
+# 4 1 color depth not_used font font_size angle font_flags height length
+#  x y string\001
+# color 0 = black
+# depth 88 (on top of color boxes)
+# not_used -1
+# font  4 = Sans Serif (in LaTeX font set)
+# font_size 14 = 14 pt
+# angle 0.0 (unrotated)
+# font_flags 0 = (default, bit 2 (value four) selects between LaTeX and PS fonts)
+# height 135 (xfig units, approximate size for 1 line in 14pt)
+# length 540 (xfig units, approximate size for 6 chars in 14pt)
+#  x y = location to start from (bottom center on centered text)
+#  string = what to print
+#  \001   = end of string marker
+#
+LabelComment
+}
+
+$row = 0;
+$col = 0;
+
+$this_left  = $left_margin;
+$this_top   = $top_margin;
+$this_right = $this_left + $box_w;
+$this_bot   = $this_top  + $box_h;
+
+for $color (@sortcolors) {
+  $id = $colors{$color}[0];
+
+  $line = "2 2 0 0 0 $id 99 -1 20 0.000 0 0 -1 0 0 5 \n  ";
+  $line .= sprintf("%d %d  %d %d  %d %d  %d %d  %d %d\n",
+                    $this_left, $this_top,
+		           $this_right, $this_top,
+			          $this_right, $this_bot,
+				         $this_left, $this_bot,
+					        $this_left, $this_top);
+
+  $document .= "# row $row, col $col $color\n" . $line;
+
+  if($uselabels) {
+    $label_left = $this_left + int($box_w / 2);
+    $label_bot  = $this_bot  + $label_tall + 50;
+
+    $label  = "4 1 0 88 -1 4 14 0.0000 0 $label_tall $label_wide";
+    $label .= " $label_left $label_bot $color\\001\n";
+
+    $document .= $label;
+  }
+
+  $row ++;
+  if($row == $per_row) {
+    $this_left  = $left_margin;
+    $this_top  += $box_h + $box_bot_pad;
+    $this_bot   = $this_top  + $box_h;
+    $row = 0;
+    $col ++;
+  } else {
+    $this_left  += $box_w + $box_right_pad;
+  }
+
+  $this_right = $this_left + $box_w;
+}
+
+if($otype eq 'f') {
+  print $document;
+}
+if($otype eq 'j') {
+  # -L jpeg	"language" jpeg (internally this is first converted to
+  #             postscript then converted to jpeg with ghostview)
+  # -b 72	border around content (pixels, 72 = 1 inch)
+  # -S 4	text smoothing factor
+  if(!open(F2D, "| fig2dev -L jpeg -b 72 -S 4")) {
+    die "$0: fig2dev pipe failed: $!\n"; 
+  }
+  print F2D $document;
+  close F2D;
+}
+

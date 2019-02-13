@@ -1,0 +1,371 @@
+#!/usr/bin/perl -w
+# Expand pixels in a PGM to make halftone pbm images.
+#
+# Based on ppmmosaic: Benjamin Elijah Griffin	28 Feb 2003
+# Benjamin Elijah Griffin			10 May 2006
+use strict;
+use Image::PPMlib;
+use vars qw( $id $arg $err $i $j $k $dc $mr 
+	     $inforef @line @out @screen @distance $gpix $opix $strag
+             $shape $factor $file $strict
+	     $VERSION
+	   );
+
+$id = $0;
+$id =~ s:.*/::;
+$VERSION = "0.5";
+
+$factor  = 10;
+$shape   = 'circle';
+$strict  = 1;
+
+sub mkdistance();
+sub prout_strict();
+sub prout_loose();
+sub initshape();
+sub prstraggle();
+sub mkscreen($);
+sub usage($);
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  $arg = $1; # stripped of first hyphen
+  shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+
+  } elsif ($arg eq 'l' or $arg eq '-loose') {
+    $strict = 0;
+  } elsif ($arg eq 's' or $arg eq '-shape') {
+    $shape = lc(shift @ARGV);
+    if ($shape =~ /^([clst])$/) {
+      $_ = $1;
+      if ($_ eq 'c') {
+        $shape = 'circle';
+      } 
+      if ($_ eq 'l') {
+        $shape = 'line';
+      } 
+      if ($_ eq 's') {
+        $shape = 'square';
+      } 
+      if ($_ eq 't') {
+        $shape = 'triangle';
+      } 
+    } 
+    if($shape !~ /^(circle|line|square|triangle)$/) {
+      $err = 1;
+      warn "$id: Invalid shape value for -s (--shape)\n";
+    }
+
+  } elsif ($arg eq 'f' or $arg eq '-factor') {
+    $factor = shift;
+    if ($factor !~ /^[1-9]\d*$/) {
+      $err = 1;
+      warn "$id: Invalid factor value for -f (--factor)\n";
+    }
+
+  } elsif ($arg eq '-') {
+    last;
+
+  } else {
+    $err = 1;
+    warn "$id: unrecognized argument: -$arg\n";
+  }
+}
+
+if ($err) {
+  die "Use --help for usage\n";
+}
+
+$file = shift;
+
+if(!defined($file)) { $file = '-'; }
+
+if(!open(PGM, "< $file")) {
+  die "$id: Cannot open $file: $!\n";
+}
+
+$inforef = readppmheader(\*PGM);
+
+if ($$inforef{error}) {
+  die "$id: $file: $$inforef{error}\n";
+}
+if ($$inforef{bgp} ne 'g') {
+  die "$id: $file is not a pgm file\n";
+}
+
+printf("P4\n%d %d\n", $$inforef{width}  * $factor,
+                      $$inforef{height} * $factor );
+
+initshape();
+
+# loop k (init): initialize each line of output height
+for($k = 0; $k < $factor; $k ++) {
+  $out[$k] = '';
+}
+
+# No stragglers to start with
+$strag = '';
+
+# loop i: each line of height
+for ($i = 0; $i < $$inforef{height}; $i ++) {
+  @line = readpixels_dec(\*PGM, $$inforef{type}, $$inforef{width});
+
+  # loop j: each pixel in the line
+  for($j = 0; $j < @line; $j ++) {
+
+    # input gray shade
+    $gpix = $Image::PPMlib::decraw{$line[$j]};
+    $opix = ord($gpix);
+
+    # initialize the screen for this shade if needed
+    if(!defined($screen[$opix])) { mkscreen($opix); }
+
+    # loop k (main): append this screen to output
+    for ($k = 0; $k < $factor; $k ++) {
+      $out[$k] .= $screen[$opix][$k];
+    }
+
+  } # end j: per pixel loop
+
+  if ($strict) { 
+    prout_strict();
+  } else {
+    prout_loose();
+  }
+
+  if(@line != $$inforef{width}) {
+    warn "$id: ran out of pixels prematurely\n";
+    last;
+  }
+
+} # for line of height
+
+# No op if in strict mode, needed in loose.
+prstraggle();
+
+exit;
+
+# FUNCTIONS FOLLOW
+
+sub prout_strict() {
+  my $l;
+
+  for ($l = 0; $l < $factor; $l++) {
+    print pack("B*",$out[$l]);
+    $out[$l] = '';
+  }
+} # end &prout_strict
+
+sub prout_loose() {
+  my $block;
+  my $len;
+  my $buf;
+  my $l;
+
+  $block = $strag;
+  for ($l = 0; $l < $factor; $l++) {
+    $block .= $out[$l];
+    $out[$l] = '';
+  }
+
+  $len = int(length($block) / 8) * 8;
+  $buf = substr($block, 0, $len, '');
+  print pack("B*",$buf);
+
+  $strag = $block;
+
+} # end &prout_loose
+
+sub prstraggle() {
+  print pack("B*",$strag);
+} # end &prstraggle
+
+sub mkscreen($) {
+  my $shade = shift;
+  my $si;	# screen width counter
+  my $sk;	# screen height counter
+  my $r;	# dot radius
+
+  $r = $mr * ($shade / 255);
+
+  # Init output
+  for ($sk = 0; $sk < $factor; $sk ++) {
+    $screen[$shade][$sk] = '';
+  }
+
+  # print STDERR "SHADE: $shade (max radius: $mr, this: $r)\n";
+  for ($si = 0; $si < $factor; $si ++) {
+    for ($sk = 0; $sk < $factor; $sk ++) {
+      if($shade && ($distance[$si][$sk] <= $r)) {      
+        $screen[$shade][$sk] .= '1';
+      } else {
+        $screen[$shade][$sk] .= '0';
+      }
+    }
+  }
+
+} # end &mkscreen
+
+sub mkdistance() {
+  my $si;	# screen width counter
+  my $sk;	# screen height counter
+
+  my $ri;	# relocated width position, squared
+  my $rk;	# relocated height position, squared
+
+  my @ps;	# relocated point, squared
+  my $p;
+
+  for ($p = 0; $p < $factor; $p ++) {
+    $ps[$p] = ($p - $dc) * ($p - $dc);
+  }
+
+  for ($si = 0; $si < $factor; $si ++) {
+    $ri = $ps[$si];
+    for ($sk = 0; $sk < $factor; $sk ++) {
+      $rk = $ps[$sk];
+      $distance[$si][$sk] = sqrt( $ri + $rk );
+    }
+  }
+} # end &mkdistance
+
+sub initshape() {
+
+  if ($shape eq 'circle') {
+    # Calculate dot center for output screen
+    $dc = int($factor / 2);
+
+    # Calculate maximum radius for dot (1.45 is sqrt(2) + fudge amount)
+    $mr = ($factor / 2) * 1.45;
+
+    # Calculate distances from center for all points in output pixel
+    mkdistance();
+  } else {
+    $dc = 0;
+    $mr = $factor;
+  }
+}
+
+sub usage($) {
+  my $rc = shift;
+
+  print STDERR <<"ProgramUsage";
+$id version $VERSION usage:
+
+  pgmtohalftonepbm reads PGM(5) files and makes larger half-tone style
+  versions of them.
+
+Arguments:
+
+  -s SHAPE   --shape  SHAPE    use circle, square, line or triangle screen
+  -f SIZE    --factor SIZE     increase size by factor of SIZE
+  -l         --loose           loose pbm format (buggy app compatibility)
+  --			       end arguments
+
+Shape defaults to circle. Shapes can be abbriviated to first letter.
+Factor defaults to 10 (100x100 pgm image becomes 1000x1000 pbm image).
+Loose pbm formatting pads only at end of file, not end of line.
+
+ProgramUsage
+  exit $rc;
+} # end &usage
+
+__END__
+
+=pod
+
+=head1 NAME
+
+pgmtohalftonepbm - make half-tone style black and white images
+
+=head1 DESCRIPTION
+
+pgmtohalftonepbm reads PGM(5) files and makes larger half-tone style
+versions of them.
+
+Options:
+
+=over 4
+
+=item *
+
+-s SHAPE   --shape  SHAPE
+
+Use a screen with "B<circle>", "B<square>", "B<line>" or "B<triangle>" output.
+Shape names can be abbreviated to the first letter.
+
+Default is C<circle>.
+
+=item *
+
+-f SIZE    --factor SIZE
+
+Increase image size by a factor of I<SIZE>. That is every pixel in the
+original becomes a I<SIZE>xI<SIZE> block in the output.
+
+Default is C<10>.
+
+=item *
+
+-l         --loose
+
+Loose pbm format (for compatibility with buggy pbm readers). In strict
+pbm format lines that aren't a multiple of 8 pixels are padded to the
+next multiple at the end of each line. In loose format, the padding
+happens only at the end of the file, if the total pixels are not a
+multiple of 8.
+
+=item *
+
+--
+
+Marks the end of the arguments
+
+=item *
+
+--help                 
+
+Show a help message and exit.
+
+=item *
+
+--version              
+
+Same as C<--help>.
+
+=back
+
+=head1 COPYRIGHT
+
+Copyright 2006 by Eli the Bearded / Benjamin Elijah Griffin.
+Released under the same license(s) as Perl.
+
+=head1 AUTHOR
+
+Eli the Bearded originally the Image::PPMlib to make a script
+very much like this one easier to code.
+
+=head1 CPAN INFO
+
+=head1 SCRIPT CATEGORIES
+
+Image
+
+=head1 README
+
+pgmtohalftonepbm - make half-tone style black and white images
+
+=head1 PREREQUISITES
+
+This uses the C<strict>, C<vars>, C<integer>, and C<Image::PPMlib> modules.
+
+=head1 COREQUISITES
+
+None.
+
+=head1 OSNAMES
+
+Should be OS independent.
+
+=cut

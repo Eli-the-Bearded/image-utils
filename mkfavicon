@@ -1,0 +1,57 @@
+#!/bin/sh
+# New version, 2018, doesn't do 16 color mode for smaller icons, does
+# do larger icons.
+usage () {
+
+echo "Usage:    mkfavicon input.ext [ favicon.ico ]"
+echo ""
+echo " Scales input.ext to a variety of square sizes and makes a favicon out"
+echo " of them. Without upscaling, tries to make input.ext into 16x16, 32x32,"
+echo " 48x48, 64x64, 128x128, and 255x255 images to combine."
+exit
+
+}
+
+input="$1"
+output="$2"
+targets="16 32 48 64 128 255"
+tmpfiles=
+tmppre=/tmp/favico-$$
+
+case "$input" in 
+   ''|-h|--help) usage ;;
+   *.pgm|*.ppm|*.pam|*.pnm) tool=cat ;;
+   *.[gG][iI][fF]) tool=giftopnm ;;
+   *.[pP][nN][gG]) tool=pngtopnm ;;
+   *.[jJ][pP][gG]|*.[jJ][pP][eE][gG]) tool=djpeg ;;
+   *) tool=anytopnm ;;
+esac
+
+if [ ! -f "$input" ] ; then usage ; fi
+if [ -z "$output" ] ; then output=favicon.ico ; fi
+
+$tool "$input" > $tmppre.full
+tmpfiles="$tmpfiles $tmppre.full"
+usefiles=
+
+# output of pnminfo is eg: ysize 500
+size=$(pnminfo -l < $tmppre.full | tr -cd 0-9 )
+
+for out in $targets ; do
+  if expr $out \< $size > /dev/null ; then
+    pnmscale -xysize $out $out $tmppre.full | pnmquant 256 > $tmppre.$out 2>/dev/null
+    tmpfiles="$tmpfiles $tmppre.$out"
+    usefiles="$usefiles $tmppre.$out"
+  else
+    if [ $out = $size ] ; then
+      pnmquant 256 < $tmppre.full > $tmppre.$out 2>/dev/null
+      tmpfiles="$tmpfiles $tmppre.$out"
+      usefiles="$usefiles $tmppre.$out"
+    fi
+  fi
+done
+
+# ppmtowinicon [-andpgms] [-output output.ico] [ppmfiles...]
+
+ppmtowinicon -output "$output" $usefiles
+rm -f $tmpfiles

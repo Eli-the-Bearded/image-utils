@@ -1,0 +1,67 @@
+#!/bin/ksh
+# Pad an image (such as from 'mkthnail -m') to be a particular size.
+#
+# Usage:
+#	padimage -w X -h Y [ -B | -W ] file ...
+#
+# Benjamin Elijah Griffin	24 April 2000
+
+
+usage () {
+
+cat <<EndUsage
+$0: usage
+  $0 [options] file1 [file2 ...]
+
+  Options
+	-h N	image height should be N
+	-w N	image width should be N
+	-B	pad color should be black
+	-W	pad color should be white
+
+Pad a ppm image (such as from 'mkthnail -m') to be a particular size.
+EndUsage
+
+exit
+}
+
+color=-black
+height=60
+width=60
+
+loop=yes
+while [ X$loop != X ] ; do
+
+  case "$1" in 
+  	-h) shift; height=$1; shift ;;
+  	-w) shift; width=$1; shift ;;
+  	-B) shift; color=-black ;;
+  	-W) shift; color=-white ;;
+    --help) usage ;;
+	-*) echo "$1 unrecognized option"; usage ;;
+	'') echo "Insufficent arguments"; usage ;;
+	 *) loop= ;;
+  esac
+
+done
+
+for each ; do
+  suf=${each##*.}
+  case "X.$suf" in
+  	X.ppm|X.pgm|X.pbm) out=${each%.$suf}-pad.$suf ;;
+	*) echo "$each might not be a PBM/PGM/PPM file."
+	   out=$each-pad.ppm ;;
+  esac
+
+  # info=`pnminfo $each`
+  x=$(pnminfo -x < $each)
+  y=$(pnminfo -y < $each)
+
+  t=`echo $height $y -  2 / p |dc`
+  b=`echo $height $y - $t - p |dc`
+  l=`echo $width  $x -  2 / p |dc`
+  r=`echo $width  $x - $l - p |dc`
+
+  pnmpad $color -l $l -r $r -t $t -b $b $each > $out
+
+done

@@ -1,0 +1,122 @@
+#!/usr/bin/perl -w
+# uses block graphics characters from traditional IBM codepage 437
+# quadrants:
+#      1122
+#      1122
+#      3344
+#      3344
+# q1234 => char 219
+# q34   => char 220
+# q13   => char 221
+# q24   => char 222
+# q12   => char 223
+# q     => char 032
+# pgmtoibmascii pgmfile > text.out
+# (optional:) texttopnm -d fontdir text.out text.ppm
+# August 2014
+use strict;
+use Image::PBMlib;	# version 2
+
+use vars qw( $file @pixels %info $w $h $best %bias $q1 $q2 $q3 $q4 );
+
+$file = shift;
+if(!open(PNM, "<", $file)) {
+  die "$0: cannot open file $file: $!\n";
+}
+
+readpnmfile( \*PNM, \%info, \@pixels, 'float' );
+
+if($info{error}) {
+  die "$0: file $file: pnm error $info{error}\n";
+}
+
+close PNM;
+
+if($info{bgp} eq 'p') {
+  die "$0: file $file: cannot handle color images\n";
+}
+
+for ($h = 0; $h < $info{height} ; $h += 2) {
+
+  for ($w = 0; $w < $info{width} ; $w += 2) {
+    $q1 = $pixels[$h][$w];
+    if(!defined($q1)) {
+      die "$file: at $w,$h undef\n";
+    }
+    chop($q1);
+
+    $q4 = undef;
+
+    if(($w + 1) < $info{width}) {
+      $q2 = $pixels[$h][$w+1];
+      chop($q2);
+    } else {
+      $q2 = 0;
+      $q4 = 0;
+    }
+
+    if(($h + 1) < $info{height}) {
+      $q3 = $pixels[$h+1][$w];
+      chop($q3);
+    } else {
+      $q3 = 0;
+      $q4 = 0;
+    }
+
+    if(!defined($q4)) {
+      $q4 = $pixels[$h+1][$w+1];
+      chop($q4);
+    }
+
+
+    if(($q1 + $q2 + $q3 + $q4) < 0.5) {
+      # full blank
+      print chr(32);
+      next;
+    }
+    if(($q1 + $q2 + $q3 + $q4) > 3.5) {
+      # full solid
+      print chr(219);
+      # print "#";
+      next;
+    }
+
+    $bias{top} = $q1 + $q2;
+    $bias{bot} = $q3 + $q4;
+    $bias{lef} = $q1 + $q3;
+    $bias{rig} = $q2 + $q4;
+
+    $best = (sort { $bias{$b} <=> $bias{$a} } (keys %bias))[0];
+
+    if($best eq 'top') {
+      # strong top
+      print chr(223);
+      # print "~";
+      next;
+    }
+
+    if($best eq 'bot') {
+      # strong bottom
+      print chr(220);
+      # print "m";
+      next;
+    }
+
+    if($best eq 'lef') {
+      # strong left
+      print chr(221);
+      # print "[";
+      next;
+    }
+
+    if($best eq 'rig') {
+      # strong right
+      print chr(222);
+      # print "]";
+      next;
+    }
+
+    die "$0: pixel $h,$w: fell through picking best\n";
+  }
+  print "\n";
+}

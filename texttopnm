@@ -1,0 +1,124 @@
+#!/usr/bin/perl -w
+# replacement for pbmtext that works with image-per-character fonts
+# and is not limited to traditional printable ASCII.
+# Use per-character images to convert a block of text to an image.
+# August 2014
+use strict;
+use vars qw( $dir $pre $post $in $mode $fmt $out $eol $chr $ord @tmp );
+
+$dir  = ".";
+$pre  = "c";
+$post = ".pgm";
+$eol  = "\n";
+$out  = "image$post";
+$mode = ":raw";
+$fmt  = "%03d";
+
+sub usage {
+  print "$0: usage\n";
+  print "  texttopnm [ options ] [ input [ output ] ]\n";
+  print "Options:\n";
+  print "   -d DIRNAME   --dir DIRNAME    source directory for images (.)\n";
+  print "   -p IMGPRE    --pre IMGPRE     prefix on image files (c)\n";
+  print "   -s IMGSUF    --suf IMGSUF     suffix on image files (.pgm)\n";
+  print "   -e EOLSTR    --eol EOLSTR     end of line string (\\n)\n";
+  print "   -u           --utf8           input is UTF-8\n";
+  print "   -r           --raw            input is raw 8bits per character\n";
+  print "\n";
+  print "Per character images should all be the same size, and be zero\n";
+  print "padded numbers: 3 dec digits for raw, 4 lc hex digits for UTF-8.\n";
+  print "Input defaults to STDIN, output defaults to imageIMGSUF\n";
+  print "Many temp files are created, with OUTFILE as name prefix.\n";
+  exit;
+}
+
+while(defined($ARGV[0])) {
+  $_ = shift;
+
+  if( /^-d$/ or /^--dir/) {
+    $dir = shift;
+    next;
+  }
+
+  if( /^-p$/ or /^--pre/) {
+    $pre = shift;
+    next;
+  }
+
+  if( /^-s$/ or /^--suf/) {
+    $post = shift;
+    next;
+  }
+
+  if( /^-e$/ or /^--eol/) {
+    $eol = shift;
+    next;
+  }
+
+  if( /^-u$/ or /^--utf8/) {
+    $mode = ":utf8";
+    $fmt  = "%04x";
+    next;
+  }
+
+  if( /^-r$/ or /^--raw/) {
+    $mode = ":raw";
+    $fmt  = "%03d";
+    next;
+  }
+
+  if( /^-h$/ or /^--help/) {
+    usage()
+    # never returns
+  }
+
+  if( /^-/ ) {
+    warn "$0: argument $_ being treated as filename\n";
+  }
+
+  if(!defined($in)) {
+    $in = $_;
+    next;
+  }
+  $out = $_;
+}
+
+if(!defined($in)) {
+  open(STDIN, "<$mode", "-") or
+  	die "$0: reopen STDIN failed: $!\n";
+} else {
+  open(STDIN, "<$mode", $in) or
+  	die "$0: open file $in failed: $!\n";
+}
+
+# set input record separator
+$/ = $eol;
+
+while(<STDIN>) {
+  chomp;
+
+  my $cmd = "pnmcat -lr ";
+  my $tmp = "$out.tmp$.$post";
+  my $img;
+
+  # As a special case for "split", the empty pattern "//" specifically
+  # matches the empty string; this is not be confused with the normal
+  # use of an empty pattern to mean the last successful match.
+  for $chr (split(//)) {
+    $ord = sprintf($fmt, ord($chr));
+    $img = "$dir/$pre$ord$post";
+    if(! -f $img) {
+      unlink(@tmp);
+      die "$0: missing image for $ord: $img\n";
+    }
+    $cmd .= "$img ";
+  }
+
+  push(@tmp, $tmp);
+  system("$cmd > $tmp");
+
+}
+
+my $cmd = "pnmcat -tb " . join(" ", @tmp);
+system("$cmd > $out");
+unlink(@tmp);

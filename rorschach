@@ -1,0 +1,87 @@
+#!/bin/ksh
+# 24 Apr 2012
+
+usage () {
+cat <<'END_of_Usage'
+rorschach: reduces colors and mirrors an image to create something
+like a Rorschach test image
+
+Usage: rorschach [ options ] [ INPUT ] > OUTPUT
+
+Options:
+    -l	--left		use left side
+    -r	--right		use right side
+    -b  --bw		black & white (pgm) output
+    -c  --color		color output
+END_of_Usage
+}
+
+side=left
+out=bw
+inputfile=
+
+while : ; do
+  case "X$1" in 
+    X-b|X--bw)    out=bw     ; shift ;;
+    X-c|X--color) out=color  ; shift ;;
+    X-l|X--left)  side=left  ; shift ;;
+    X-r|X--right) side=right ; shift ;;
+    X-*) echo "$0: do not recognize option '$1'"
+         usage
+	 exit 2 ;;
+    X?*) case "X$inputfile" in
+    		X) inputfile="$1" ; shift ;;
+		X*) echo "$0: what to do with '$1'?"
+		    usage
+		    exit 2 ;;
+	 esac ;;
+    X) break ;;
+  esac
+done
+
+tmpdir=/tmp/ror.$$
+mkdir $tmpdir || exit
+tfile=$tmpdir/noname
+
+if [ $out = bw ] ; then
+  cat $inputfile | ppmtopgm | pgmtopbm -thres > $tfile.whole
+  wide=$(pnminfo -x < $tfile.whole )
+  clist=whole
+else
+  cat $inputfile | (cd $tmpdir && ppmtorgb3)
+  wide=$(pnminfo -x < $tfile.red )
+  clist='red grn blu'
+
+  for c in $clist ; do
+    mv $tfile.$c $tfile.$c.orig
+    pgmtopbm -thres $tfile.$c.orig > $tfile.$c
+  done
+fi
+
+half=$(( $wide / 2 ))	# rounds down
+twice=$(( $half * 2 ))	# this will be the size of our output
+
+for c in $clist ; do
+  f=$tfile.$c
+  if [ $side = left ] ; then
+    pamcut -width $half $f > $f.l
+    pamflip -lr $f.l > $f.r
+  else
+    pamcut -left $half -width $half $f > $f.r
+    pamflip -lr $f.r > $f.l
+  fi
+
+  pamcut -width $twice $f > $f.tmp && mv $f.tmp $f
+  pnmcat -lr $f.l $f.r > $f.ror
+done
+
+if [ $out = bw ] ; then
+  pbmtopgm 2 2 $tfile.whole.ror
+else
+  rgb3toppm $tfile.red.ror $tfile.grn.ror $tfile.blu.ror
+fi
+
+rm -rf $tmpdir
+
+exit
+

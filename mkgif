@@ -1,0 +1,66 @@
+#!/bin/ksh
+# Automate making gifs
+# by Benjamin Elijah Griffin 	24 Sep 1999
+
+usage () {
+
+cat <<EndUsage
+$0: usage
+  $0 [options] file1 [file2 ...]
+
+  Options
+	-b N	use N bits per pixel (default 8, max 8)
+	-t COL	make color COL transparent 
+	-s 	use simpler output file names
+
+  Colors can be specified as 
+  
+  	r/b/g		decimal numbers
+  	r,b,g		decimal numbers
+	#rrbbgg		hex numbers
+
+  The files by default will be saved with an extension that indicates
+  the number of bits used and '.gif'.
+EndUsage
+
+exit
+}
+
+bits=8
+trans=
+simple=no
+loop=yes
+while [ X$loop != X ] ; do
+
+  case "$1" in 
+  	-b) shift; bits=$1; shift ;;
+  	-t) shift; trans="-transparent $1"; shift ;;
+  	-s) shift; simple=yes ;;
+    --help) usage ;;
+	-*) echo "$1 unrecognized option"; usage ;;
+	'') echo "Insufficent arguments"; usage ;;
+	 *) loop= ;;
+  esac
+
+done
+
+if [ $simple = no ] ; then
+  ex=-${bits}b.gif
+else
+  ex=.gif
+fi
+
+quant=`echo 2^$bits | bc`
+
+for each ; do
+  case $each in
+  	*.tif|*.tiff) new=${each%%.tif*}$ex ; tool=tifftopnm ;;
+	*.jpg|*.jpeg) new=${each%%.jp*g}$ex ; tool=djpeg ;;
+               *.gif) new=${each%%.gif}$ex  ; tool=giftopnm ;;
+	  *.p[bgpn]m) new=${each%%.p[bgpn]m}$ex ; tool=cat ;;
+	       *.xcf) echo "Skipping $each (no .xcf converter)" ; next ;;
+	         *.*) new=${each%.*}$ex ; tool=anytopnm ;;
+  esac
+  $tool $each | ppmquant $quant | ppmtogif $trans > $new
+  echo $new done
+done

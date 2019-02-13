@@ -1,0 +1,39 @@
+filter tools:
+
+combine N images, each with an image mask, into one image
+split one image into N images based on N image masks
+break one image into N imagemasks based monochromatic regions
+
+Filter ideas:
+
+multiple graph lines like that Joy Division album
+
+censor with random black rectangles
+
+mirroring
+
+fun-house mirror / uneven distort
+
+uneven sized (but each single color) circles
+
+hex tiles (each single color) with borders
+
+night-vision monochrome
+
+video cam overlay
+
+cyborg overlay
+
+divide into tiles (grid not shown) with a few tiles distorted / flipped
+
+make a pan-and-scan mpeg, then corrupt the video and pull frames out
+
+progressive (along user defined line) slice and seperately filter
+
+rgb tv color clusters
+
+tv style alternating dim lines
+
+several random circles rotated
+
+future world: http://www.flickr.com/photos/mr_carl/6912088005/

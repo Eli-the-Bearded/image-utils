@@ -1,0 +1,285 @@
+#!/usr/bin/perl -w
+# Make a rain drop effect, optionally for multiple frames.
+# April 2006		Benjamin Elijah Griffin
+use strict;
+use vars qw( $id $w $h $count $length $speed $frames $base $dark $rseed
+             $wrap $white $outfile $img @shades @drops %pgm $head $f $p
+	     $drop
+           );
+use Image::PBMlib;
+
+$id = $0;
+$id =~ s:.*/::;
+
+sub mkshades();
+sub mkdrops();
+sub mkdrop();
+sub mkimg();
+sub movedrops();
+sub movedrop();
+sub printimg();
+sub usage($);
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  my $arg = $1; shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    usage(0);
+  } elsif ($arg eq 'h' or $arg eq '-height') {
+    $h = shift;
+  } elsif ($arg eq 'w' or $arg eq '-width') {
+    $w = shift;
+  } elsif ($arg eq 'c' or $arg eq '-count') {
+    $count = shift;
+  } elsif ($arg eq 'l' or $arg eq '-length') {
+    $length = shift;
+  } elsif ($arg eq 's' or $arg eq '-speed') {
+    $speed = shift;
+  } elsif ($arg eq 'f' or $arg eq '-frames') {
+    $frames = shift;
+  } elsif ($arg eq 'b' or $arg eq '-base') {
+    $base = shift;
+  } elsif ($arg eq 'd' or $arg eq '-dark') {
+    $dark = shift;
+  } elsif ($arg eq 'r' or $arg eq '-randomseed') {
+    $rseed = shift;
+  } elsif ($arg eq 'W' or $arg eq '-wrap') {
+    $wrap = 1;
+  } else {
+    die "$id: unrecognized option: -$arg\n";
+  }
+}
+
+if (!defined($w)) {
+  $w = 250;
+}
+if (!defined($h)) {
+  $h = $w;
+}
+
+if($w !~ /^[1-9]\d*$/) {
+  die "$id: invalid width '$w': 1 or up\n";
+}
+if($h !~ /^[1-9]\d*$/) {
+  die "$id: invalid height '$h': 1 or up\n";
+}
+
+$p = $w * $h;
+
+if(!defined($count)) {
+  $count = int($p / 100) + 1;
+} elsif ($count !~ /^[1-9]\d*$/) {
+  die "$id: invalid count '$count': 1 or up\n";
+}
+
+if(!defined($length)) {
+  $length = int($h / 10) + 1;
+} elsif ($length !~ /^[1-9]\d*$/) {
+  die "$id: invalid length '$length': 1 or up\n";
+}
+
+if(!defined($speed)) {
+  $speed = int($length / 10) + 2;
+} elsif ($speed !~ /^[1-9]\d*$/) {
+  die "$id: invalid speed '$speed': 1 or up\n";
+}
+
+if(!defined($frames)) {
+  $frames = 1;
+} elsif ($frames !~ /^[1-9]\d*$/) {
+  die "$id: invalid frames '$frames': 1 or up\n";
+}
+
+if(!defined($dark)) {
+  $dark = 0;
+} elsif (($dark !~ /^\d\d*$/) or ($dark > 254)) {
+  die "$id: invalid dark '$dark': 0 to 254\n";
+}
+
+if(!defined($rseed)) {
+  srand;
+} elsif ($rseed !~ /^-?\d\d*$/) {
+  die "$id: invalid random seed '$rseed': some integer\n";
+} else {
+  srand $rseed;
+}
+
+if(!defined($base)) {
+  1;
+} elsif (!length($base)) {
+  die "$id: invalid base: must not be empty\n";
+}
+
+if (0) {
+print STDERR <<"DebugOptions"; # DEBUG
+h:	$h
+w:	$w
+p:	$p
+count:	$count
+length:	$length
+speed:	$speed
+frames:	$frames
+base:	$base
+dark:	$dark
+DebugOptions
+}
+
+%pgm = (
+  type => 5,	# raw graymap
+  width => $w,
+  height => $h,
+  max => 255
+);
+$head = makeppmheader(\%pgm);
+
+$white = chr(255);
+
+mkshades();
+mkdrops();
+
+for ($f = 0; $f < $frames; $f ++) {
+  if ($base) {
+    $outfile = sprintf("%s%07d.pgm",$base,$f);
+    if(!open(STDOUT, "> $outfile")) {
+      die "$id: failed to open output file $outfile: $!\n";
+    }
+  }
+
+  mkimg();
+  movedrops();
+  printimg();
+}
+
+exit;
+
+sub printimg() {
+  print STDOUT $head . $img;
+}
+
+sub movedrops() {
+  for $drop (@drops) {
+    movedrop();
+  }
+}
+
+sub mkshades() {
+  my $s = $length + 1;
+  my $j = (255 - $dark) / $length;
+  my $c = $dark;
+
+  # print STDERR "shades: s = $s, j = $j, c = $c\n"; # DEBUG
+
+  while($s) {
+    unshift(@shades, chr($c));
+    $c += $j;
+    if ($c >= 255) { # rounding error perhaps
+      $c = 255;
+    }
+    $s --;
+  }
+
+  # { local $" = ","; print "\@shades = (@shades)\n"; } # DEBUG
+}
+
+sub mkimg() {
+  # Start all white
+  $img = $white x $p;
+
+  for $drop (@drops) {
+    drawdrop();
+  }
+}
+
+sub movedrop() {
+  my $sy = $$drop{y};	# start y coordinate (might be off image)
+  my $i  = $$drop{l};	# length of this drop
+
+  $sy += $speed;
+  if($sy >= $h) {
+    if($wrap) { 
+      $sy -= $h + $i;
+      $$drop{y} = $sy;
+    } else {
+      $drop = mkdrop();
+    }
+  } else {
+    $$drop{y} = $sy;
+  }
+}
+
+
+sub drawdrop() {
+  my $sx = $$drop{x};	# start x coordinate
+  my $sy = $$drop{y};	# start y coordinate (might be off image)
+  my $i  = $$drop{l};	# length of this drop
+  my $c  = $$drop{c};	# starting color of this drop
+  my $off;		# offset into image
+
+  while($i) {
+    if($sy >= $h) {
+      return;
+    }
+    if($sy >= 0) {
+      $off = $sy * $w + $sx;
+      substr($img, $off, 1, $shades[$c]);
+      # print STDERR "drew: x = $sx, y = $sy, c $c (".ord($shades[$c])."), off = $off\n" if $i == $$drop{l}; #DEBUG
+    } else {
+      1; # print STDERR "xxxx $i: x = $sx, y = $sy, c $c (".ord($shades[$c]).")\n"; #DEBUG
+    }
+    $i --;
+    $c ++;
+    $sy ++;
+  }
+}
+
+sub mkdrops() {
+  my $n = $count;
+
+  while($n) {
+    push(@drops, mkdrop());
+    $n --;
+  }
+}
+
+sub mkdrop() {
+  my $x;
+  my $y;
+  my $l;
+  my $c;
+  my $percent;
+
+  $percent = 71 + rand(30);
+  $l = int(($length * $percent)/100);
+
+  $c = $length - $l;
+  if(rand(3) > 2) {
+    $c ++;
+  }
+
+  $x = int(rand( $w + 1 ));
+  $y = int(rand( $h + $l )) - $l;
+
+  # print STDERR "drop: x => $x, y => $y, l => $l, c => $c\n"; # DEBUG
+  return { x => $x, y => $y, l => $l, c => $c };
+}
+
+sub usage($) {
+  my $exit = shift;
+
+print <<"EndUsage";
+mkrain options
+  --help 		print this message
+  --version	-v	print this message
+  --height  N	-h N	use N as image height
+  --width   N	-w N	use N as image width
+  --count   N	-c N	draw N drops in picture
+  --length  N	-l N	drop length max is N (min 70% of N)
+  --rseed   N	-r N	use N as random seed
+  --dark    C	-d C	use C (0 to 254) as darkest color
+  --frames  N	-f N	print N frames
+  --speed   N	-s N	drops move up to N each frame
+  --base    F	-b F	use F as base filename
+  --wrap	-W	drops off bottom should wrap to top
+EndUsage
+
+  exit($exit);
+}

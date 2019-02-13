@@ -1,0 +1,227 @@
+#!/usr/bin/perl -w
+# Change the dimensions of a PBM/PGM/PPM file without changing the data.
+# All that gets changed is the image header. Images changed in this way
+# must use dimensions that give the same file size, eg switching X and Y
+# sizes. In many cases such images will look like corrupted images.
+# Useful for steganography with ppmstegan.
+#
+# 11 Jan 2005
+use strict; 
+use Image::PBMlib;
+use vars qw( $id $in $ix $iy $it $is $ox $oy $ot $os $swap %info $ref %factor );
+
+$id = $0;
+$id =~ s:.*/::;
+
+%factor = (
+  b => 1,	B => 1,
+  g => 8,	G => 8,
+  p => 24,	P => 24,
+);
+
+while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
+  if ($ARGV[0] eq '-x') {
+    shift;
+    $ox = shift;
+    if(!defined($ox) or ($ox !~ /^\d+$/)) {
+       print STDERR "$id: -x requires a number\n";
+       exit 2;
+    }
+  } elsif ($ARGV[0] eq '-y') {
+    shift;
+    $oy = shift;
+    if(!defined($oy) or ($oy !~ /^\d+$/)) {
+       print STDERR "$id: -y requires a number\n";
+       exit 2;
+    }
+  } elsif (($ARGV[0] eq '-s') or ($ARGV[0] eq '--swap')) {
+    shift;
+    $swap = 1;
+  } elsif (($ARGV[0] eq '-t') or ($ARGV[0] eq '--type')) {
+    shift;
+    $ot = lc(shift);
+    if(!defined($ot) or ($ot !~ /^[bgp]$/)) {
+       print STDERR "$id: -t (--type) requires a type: B, G, or P\n";
+       exit 2;
+    }
+  } elsif ($ARGV[0] eq '--help' or $ARGV[0] eq '--version') {
+    print STDERR "$id: usage\n", <<USAGEinfo;
+	pnmchdim [options] in.pnm > out.pnm
+
+Options:
+ -x         NUM      use NUM as x (width) dimension in output
+ -y         NUM      use NUM as y (height) dimension in output
+ -s --swap           swap x and y dimensions
+ -t --type  [B|G|P]  change output type to bitmap, graymap or pixmap
+
+The in and out pictures must have the same number of bits.
+Bits for a PBM file are X * Y * 1
+Bits for a PGM file are X * Y * 8
+Bits for a PPM file are X * Y * 24
+
+USAGEinfo
+
+    exit 2;
+  } else {
+    print STDERR "$id: $ARGV[0] not a recognized option, use --help for help\n";
+    exit 2;
+  }
+}
+
+$in  = shift;
+if(!defined($in)) {
+  die "$id: Missing benign input file\n";
+}
+if(!open(PNM, "< $in")) {
+  die "$id: Can't open input $in: $!\n";
+}   
+
+$ref  = readppmheader(\*PNM);
+if(defined($$ref{error})) {
+  die "$id: PPM error, $in: $$ref{error}\n";
+}
+
+$ix = $$ref{width};
+$iy = $$ref{height};
+$it = $$ref{bgp};
+
+if($swap) { $ox = $iy; $oy = $ix; }
+
+if(!defined($ox)) { $ox = $ix; }
+if(!defined($oy)) { $oy = $iy; }
+if(!defined($ot)) { $ot = $it; }
+
+$is = ($ix * $iy * $factor{$it});
+$os = ($ox * $oy * $factor{$ot});
+
+if( $is != $os ) {
+  print STDERR "$is = ($ix * $iy * $factor{$it});\n";
+  print STDERR "$os = ($ox * $oy * $factor{$ot});\n";
+  die "$id: in/out size mismatch ($is != $os)\n";
+}
+
+%info = (
+  bgp => $ot,
+  width => $ox,
+  height => $oy,
+  max => 255,
+  raw => 1,
+);
+
+print makeppmheader(\%info);
+while(<PNM>) { print; }
+
+exit;
+__END__
+
+=pod
+
+=head1 NAME
+
+pnmchdim - change dimensions of a PBM/PGM/PPM file without changing data
+
+=head1 DESCRIPTION
+
+Change the dimensions of a PBM/PGM/PPM file without changing the data.
+
+Sample usage:
+
+	pnmchdim --swap portrait.ppm > landscape.ppm
+
+All that gets changed is the image header. Images changed in this way
+must use dimensions that give the same file size, eg switching X and Y
+sizes. In many cases such images will look like corrupted images.
+Useful for steganography with C<ppmstegan>.
+
+=head1 USAGE
+
+Usage:
+
+	pnmchdim [options] in.pnm > out.pnm
+
+Options:
+
+=over 4
+
+=item *
+
+-s --swap
+
+Swap the X and Y dimensions.
+
+=item *
+
+-t --type [B|G|P]
+
+Set the output file type to be PBM (bitmap), PGM (graymap), or PPM (pixmap).
+
+=item *
+
+-x  NUM
+
+Use NUM as the X (width) deminesion in output.
+
+=item *
+
+-y  NUM
+
+Use NUM as the Y (height) deminesion in output.
+
+=item *
+
+--help
+
+Prints a usage message and exits.
+
+=back
+
+Any unset values will retain the same value as the original file.
+The in and out pictures must have the same number of bits.
+
+Bits for a PBM file are X * Y * 1
+
+Bits for a PGM file are X * Y * 8
+
+Bits for a PPM file are X * Y * 24
+
+
+=head1 SEE ALSO
+
+C<ppmstegan> - merge two images stegangraphically
+
+C<ppmlowbit> - extract an image from the lowbits of an image
+
+=head1 COPYRIGHT
+
+Copyright 2005 by Eli the Bearded / Benjamin Elijah Griffin.
+Released under the same license(s) as Perl.
+
+=head1 AUTHOR
+
+Eli the Bearded wrote the C<ppmstegan>, C<ppmlowbit>, and C<pnmchdim>
+set of tools to examine a demo steganographic image.
+
+=head1 CPAN INFO
+
+=head1 SCRIPT CATEGORIES
+
+Image
+
+=head1 README
+
+pnmchdim - change dimensions or type of a PBM/PGM/PPM file
+
+=head1 PREREQUISITES
+
+This uses the C<strict>, C<vars>, and C<Image::PPMlib> modules.
+
+=head1 COREQUISITES
+
+The C<ppmlowbit> and C<ppmstegan> scripts might be useful.
+
+=head1 OSNAMES
+
+Should be OS independent.
+
+=cut
+

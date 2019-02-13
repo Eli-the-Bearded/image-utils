@@ -1,0 +1,28 @@
+#!/bin/ksh
+# loop over named files to find min / max values dimensions
+
+maxx=
+maxy=
+minx=
+miny=
+
+for f ; do
+  x=$(pnminfo -x < "$f")
+  y=$(pnminfo -y < "$f")
+
+  if [ "X$maxx" = X ] ; then
+    maxx=$x
+    maxy=$y
+    minx=$x
+    miny=$y
+  else
+    if expr $x \> $maxx >/dev/null ; then maxx=$x ; fi
+    if expr $y \> $maxy >/dev/null ; then maxy=$y ; fi
+    if expr $x \< $minx >/dev/null ; then minx=$x ; fi
+    if expr $y \< $miny >/dev/null ; then miny=$y ; fi
+  fi
+done
+echo maxx=$maxx
+echo maxy=$maxy
+echo minx=$minx
+echo miny=$miny

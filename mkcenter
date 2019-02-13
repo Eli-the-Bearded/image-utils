@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+# Uses pnmpad to center an image in an WxH rectangle
+#
+# Usage:
+# 	mkcenter [options] W H file ...
+#
+# The files can be any format handled by anytopnm
+# New output files will be made.
+#
+# Options:
+#	-v         --verbose         print commands before executing
+#	-w         --white           white border
+#	-b         --black           black border
+#       -t         --savetmp         do not delete tmp files
+#
+# 2 Mar 2004	Benjamin Elijah Griffin
+use strict;
+use integer;
+use vars qw( $color $verbose $in $out $save $suf $basepipe $pipe $err
+             $savetmp $tmp $xy $tw $th $w $h $t $b $l $r
+           );
+
+$verbose = 0;
+$color = '';
+
+sub mysystem ($) {
+  my $command = shift;
+  
+  if ($verbose) { print "$command\n"; }
+  system($command);
+} # end &mysystem
+
+sub myqx ($) {
+  my $command = shift;
+  
+  if ($verbose) { print "$command\n"; }
+  qx($command);
+} # end &myqx
+
+sub deltmps() {
+  if (!$savetmp) {
+    if ($verbose) { print "rm -f '$tmp'\n"; }
+    unlink($tmp);
+  }
+} # end &deltmps
+
+while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
+    if (($ARGV[0] eq '-b') or ($ARGV[0] eq '--black'))  {
+      $color = "-black";
+      shift;
+
+    } elsif (($ARGV[0] eq '-w') or ($ARGV[0] eq '--white'))  {
+      $color = "-white";
+      shift;
+
+    } elsif (($ARGV[0] eq '-v') or ($ARGV[0] eq '--verbose'))  {
+      $verbose ++;
+      shift;
+
+    } elsif (($ARGV[0] eq '-t') or ($ARGV[0] eq '--savetmp'))  {
+      $savetmp ++;
+      shift;
+
+
+    } elsif($ARGV[0] eq '--help') {
+      print << "USAGEmessage";
+Usage:
+	mkcenter [options] W H file ...
+
+Uses pnmpad to center an image in an WxH rectangle.
+The files can be any format handled by anytopnm
+New files will be created.
+
+Options:
+	-v         --verbose         print commands before executing
+	-w         --white           white border
+	-b         --black           black border
+	-t         --savetmp         save temp files
+
+USAGEmessage
+    } else {
+      warn "$0: unknown option $ARGV[0]; --help for help\n";
+      $err ++;
+      shift;
+    }
+} # while processing options
+
+if($err) {
+  exit(2);
+}
+
+$w = shift;
+$h = shift;
+if(!defined($w) or !defined($h) or $w !~ /^\d+$/ or $h !~ /^\d+$/) {
+  die "$0: dimensions not specified\n";
+}
+
+if(!defined($ARGV[0])) {
+  die "$0: no files specified\n";
+}
+
+for $in (@ARGV) {
+  $save = $in;
+
+  if( $in =~ s/\.jpe?g$//i ) {
+    $pipe = "djpeg '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.gif$//i ) {
+    $pipe = "giftopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.tiff?$//i ) {
+    $pipe = "tifftopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+
+  } elsif( $in =~ s/\.bmp$//i ) {
+    $pipe = "bmptoppm '$save' ";
+    $suf = ".ppm";
+
+  } elsif( $in =~ s/(\.p[bgpn]m)$//i ) {
+    $pipe = "cat '$save' ";
+    $suf = $1;
+
+  } elsif( $in =~ s/(\.p[bgpn]m).gz$//i ) {
+    $pipe = "zcat '$save' ";
+    $suf = $1;
+
+  } elsif( $in =~ s/(\.p[bgpn]m).bz2$//i ) {
+    $pipe = "bzcat '$save' ";
+    $suf = $1;
+  } else {
+
+    $pipe = "anytopnm '$save' ";
+    $suf = ".ppm"; # probably .pgm possible
+  }
+
+  $tmp = "$in.tmp$suf";
+  mysystem("$pipe > '$tmp'");
+
+  $pipe = "pnminfo -d '$tmp'";
+  $xy = myqx($pipe);
+  if($xy !~ /\d\s*x\s*\d/) {
+    warn "$0: can't get size of '$tmp'\n";
+    &deltmps();
+    next;
+  }
+
+  ($tw, $th) = $xy =~ /(\d+)\s*x\s*(\d+)/;
+
+  $out = "$in-${w}x${h}$suf";
+
+  # Note: use integer in effect
+  $t = ($h - $th) / 2;   ($t < 0) ? $t = 0:0;
+  $l = ($w - $tw) / 2;   ($l < 0) ? $l = 0:0;
+  $b = ($h - $th - $t);  ($b < 0) ? $b = 0:0;
+  $r = ($w - $tw - $l);  ($r < 0) ? $r = 0:0;
+
+  $pipe = "pnmpad $color -l$l -r$r -t$t -b$b '$tmp' > '$out'";
+
+  mysystem($pipe);
+  &deltmps();
+
+}

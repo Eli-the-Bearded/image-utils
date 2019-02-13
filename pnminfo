@@ -1,0 +1,181 @@
+#!/usr/bin/perl -w
+# Print information about PBM/PGM/PPM files
+# Benjamin Elijah Griffin	1 Dec 1999
+use strict;
+use integer;
+use vars qw( $in $type $x $y $max $id $print );
+
+$id = $0;
+$id =~ s:.*/::;
+
+$print = 'all';
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  my $arg = $1; shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+  } elsif ($arg eq 'd' or $arg eq '-dimensions') {
+    $print = 'dim';
+  } elsif ($arg eq 'x' or $arg eq '-xonly') {
+    $print = 'x';
+  } elsif ($arg eq 'y' or $arg eq '-yonly') {
+    $print = 'y';
+  } elsif ($arg eq 'l' or $arg eq '-largest') {
+    $print = 'lg';
+  } elsif ($arg eq 'p' or $arg eq '-pixels') {
+    $print = 'pix';
+  } elsif ($arg eq 'm' or $arg eq '-maxval') {
+    $print = 'max';
+  } elsif ($arg eq 't' or $arg eq '-type') {
+    $print = 'type';
+  } elsif ($arg eq 'b' or $arg eq '-bits') {
+    $print = 'bits';
+  }
+}
+
+if(!defined($ARGV[0])) { $ARGV[0] = '-'; }
+
+while(defined($ARGV[0])) {
+  open(STDIN,"< $ARGV[0]") or die "$id: Can't open '$ARGV[0]': $!\n";
+
+  $in = '#';
+  while($in =~ /^#/) { $in = <STDIN> }
+
+  if($ARGV[0] ne '-') {
+    print "$ARGV[0]: ";
+  }
+  shift;
+
+  if ($in =~ s/^P([1-6])\s*//) {
+    $type = $1;
+  } else {
+    warn "$id: no portable image file found\n";
+    exit(1);
+  }
+
+  if ($print ne 'type') {
+
+    read(STDIN,$in,1024,length($in));
+
+    # Eat comments, if the version allows comments
+    if ($type < 4 and $in =~ tr:#:#:) {
+      while ($in =~ s/(^|\cm|\cj)#[^\cj\cm]*([\cm\cj])/$1$2/g) { 
+	read(STDIN,$in,256,length($in));
+      }
+    }
+
+    if ($in =~ s/^\s*(\d+)\s+(\d+)\s+//) {
+      $x = $1;
+      $y = $2;
+    } else {
+      warn "$id: no dimensions found in image\n";
+      exit(1);
+    }
+
+    if ($type != 1 and $type != 4) {
+      if ($in =~ s/^\s*(\d+)\s+//) {
+	$max = $1;
+      } else {
+	warn "$id: no max value found in image\n";
+	exit(1);
+      }
+    } else {
+	$max = 1;
+    }
+
+  } # print != type
+
+  if ($print eq 'type' or $print eq 'all') {
+    if ($type == 1) {
+      print "pbm ";
+      print "(black and white) " if $print eq 'type';
+    } elsif ($type == 4) {
+      print "pbm rawbits ";
+      print "(black and white) " if $print eq 'type';
+    } elsif ($type == 2) {
+      print "pgm ";
+      print "(grayscale) " if $print eq 'type';
+    } elsif ($type == 5) {
+      print "pgm rawbits ";
+      print "(grayscale) " if $print eq 'type';
+    } elsif ($type == 3) {
+      print "ppm ";
+      print "(color) " if $print eq 'type';
+    } elsif ($type == 6) {
+      print "ppm rawbits ";
+      print "(color) " if $print eq 'type';
+    }
+  }
+
+  if ($print eq 'dim' or $print eq 'all') {
+    print "$x x $y "
+  }
+
+  if ($print eq 'lg') {
+    if ($x > $y) {
+      $print = 'x';
+      print 'xsize '
+    } else {
+      $print = 'y';
+      print 'ysize '
+    }
+  }
+  if ($print eq 'x') {
+    print $x;
+  }
+  if ($print eq 'y') {
+    print $y;
+  }
+
+  if ($print eq 'pix' or $print eq 'all') {
+    print '(' if $print eq 'all';
+    print ($x*$y);
+    print ' pixels) ' if $print eq 'all';
+  }
+
+  if ($print eq 'max' or $print eq 'all') {
+      print 'maxval ' if $print eq 'all';
+      print "$max ";
+  }
+
+  if ($print eq 'bits' or $print eq 'all') {
+    my $bits = 1;
+    while ($max /=2) { $bits ++ };
+    if ($type == 3 or $type == 6) {
+      $bits *= 3;
+    }
+    
+    print '(' if $print eq 'all';
+    print $bits;
+    print ' bits / pixel) ' if $print eq 'all';
+  }
+
+  print "\n";
+  close STDIN;
+}
+
+exit(0);
+
+sub usage ($) {
+  my $exit = shift;
+
+  print "$id: usage\n", <<USAGEnotes;
+  	pnminfo [option] [file]
+
+Options:
+
+	-h	--help		print this message
+	-d	--dimensions	print x and y size
+	-x	--xonly		print x size only
+	-y	--yonly		print y size only
+	-l	--largest	print the largest size only
+	-p	--pixels	print number of pixels in image
+	-m	--maxval	print the maximum value of a pixel/color
+	-b	--bits		print the bits / pixel
+	-t	--type		print the file type
+
+The default is to print all information about the image.
+USAGEnotes
+
+  exit($exit);
+} # end &usage 

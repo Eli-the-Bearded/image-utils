@@ -1,0 +1,230 @@
+#!/usr/bin/perl -w
+#
+# Very simple steganographic image hiding.
+#
+# Takes two images of the same size, benign.ppm and evil.ppm, and hides
+# evil.ppm in benign.ppm. The upper two bits of image information from
+# evil.ppm get put in the lower two bits of benign.ppm
+#
+# Images need to be the same size -- in number of pixels, not in height/width,
+# so benign.ppm could be landscape oriented and evil.ppm could be portrait.
+# If the images have different heights/widths ppmlowbit won't know that and
+# will use benign.ppm's dimensions. You'll need to resize it by hand.
+#
+# Usage: ppmstegan benign.ppm evil.ppm > steganography.ppm
+# Use "ppmlowbit steganography.ppm > newevil.ppm" to extact.
+#
+# See also pnmchdim
+#
+# 3 Jan 2005
+use strict;
+use Image::PBMlib;
+use vars qw( $id $inn $evil $keepmask $losemask $shiftbits $refin $refevil
+             $i $j @pixelsin $pin @pixelsevil $pevil );
+
+$id = $0;
+$id =~ s:.*/::;
+
+
+$losemask  = 192;	# 11000000
+$keepmask  = 252;	# 11111100 above reversed and inverted
+$shiftbits = 6;		# number of zeros in losemask / ones in keepmask
+
+while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
+  if (($ARGV[0] eq '-b') or ($ARGV[0] eq '--bits')) {
+    shift;
+    $shiftbits = shift;
+    if(!defined($shiftbits) or ($shiftbits !~ /^[1-7]$/)) {
+       print STDERR "$id: -b (--bits) requires a number from 1 to 7\n";
+       exit 2;
+    }
+    $keepmask  = (255 << $shiftbits) & 255;
+    $shiftbits = 8 - $shiftbits;
+    $losemask  = (255 << $shiftbits) & 255;
+    print STDERR "lose: $losemask	 keep: $keepmask	bits: $shiftbits\n";
+  } elsif ($ARGV[0] eq '--help' or $ARGV[0] eq '--version') {
+    print STDERR "$id: usage\n", <<USAGEinfo;
+	ppmstegan [options] benign.ppm evil.ppm > stegan.ppm
+
+Options:
+ -b --bits  NUM   put upper NUM bits of evil in lower bits of benign, default 2
+
+PGM and PPM images supported, but both files must be the same type. The
+benign and evil pictures must have the same number of pixels, but dimensions
+can vary. The stegan output will use the benign dimensions. See pnmchdim.
+
+USAGEinfo
+
+    exit 2;
+  } else {
+    print STDERR "$id: $ARGV[0] not a recognized option, use --help for help\n";
+    exit 2;
+  }
+}
+
+$inn  = shift;
+$evil = shift;
+
+if(!defined($inn)) {
+  die "$id: Missing benign input file\n";
+}
+if(!defined($evil)) {
+  die "$id: Missing evil input file\n";
+}
+if(!open(PPMI, "< $inn")) {
+  die "$id: Can't open benign input $inn: $!\n";
+}   
+if(!open(PPME, "< $evil")) {
+  die "$id: Can't open evil input $evil: $!\n";
+}   
+
+$refin   = readppmheader(\*PPMI);
+$refevil = readppmheader(\*PPME);
+
+if(defined($$refin{error})) {
+  die "$id: PPM error, $inn: $$refin{error}\n";
+}
+
+if(defined($$refevil{error})) {
+  die "$id: PPM error, $evil: $$refevil{error}\n";
+}
+
+if(($$refin{bgp} eq 'b') or ($$refevil{bgp} eq 'b')) {
+  die "$id: PPM error: bitmaps do not have enough bits per pixel\n";
+}
+
+if($$refin{bgp} ne $$refevil{bgp}) {
+  die "$id: Images are different types (color/gray)\n";
+}
+
+if(($$refin{width} * $$refin{height}) != 
+   ($$refevil{width} * $$refevil{height})) {
+  die "$id: Images have different numbers of pixels\n";
+}
+
+# Just dump the same header
+print $$refin{fullheader};
+
+# Read everything
+@pixelsin   = readpixels_raw(\*PPMI, $$refin{type},
+		($$refin{width} * $$refin{height}) );
+@pixelsevil = readpixels_raw(\*PPME, $$refevil{type},
+		($$refevil{width} * $$refevil{height}) );
+
+for($i = 0; $i < ($$refevil{width} * $$refevil{height}); $i ++) {
+  $pin   = $pixelsin[$i];
+  $pevil = $pixelsevil[$i];
+
+  if($$refin{bgp} eq 'g') {
+    print chr(   (ord($pin)   & $keepmask)
+              | ((ord($pevil) & $losemask) >> $shiftbits)
+	     );
+  } else {
+    for ($j = 0; $j <= 2; $j ++) {
+      print chr(   (ord($$pin[$j])   & $keepmask)
+		| ((ord($$pevil[$j]) & $losemask) >> $shiftbits)
+	       );
+    }
+  }
+}
+exit;
+__END__
+
+=pod
+
+=head1 NAME
+
+ppmstegan - merge two images stegangraphically
+
+=head1 DESCRIPTION
+
+Very simple steganographic image hiding.
+
+Most basic usage:
+
+	ppmstegan benign.ppm evil.ppm > steganography.ppm
+
+Takes two images of the same size, I<benign.ppm> and I<evil.ppm>, and hides
+I<evil.ppm> in I<benign.ppm>. The upper two bits of image information from
+I<evil.ppm> get put in the lower two bits of I<benign.ppm>. The I<evil.ppm>
+image can be extracted with C<ppmlowbit>.
+
+Images need to be the same size -- in number of pixels, not in height/width,
+so I<benign.ppm> could be landscape oriented and I<evil.ppm> could be portrait.
+If the images have different heights/widths C<ppmlowbit> won't know that and
+will use I<benign.ppm>'s dimensions. You'll need to resize it by hand, eg
+with C<pnmchdim>.
+
+=head1 USAGE
+
+Usage:
+
+	ppmstegan [options] benign.ppm evil.ppm > stegan.ppm
+
+Options:
+
+=over 4
+
+=item *
+
+-b --bits  NUM
+
+Put the upper NUM bits of evil.ppm in lower bits of benign.ppm, defaults
+to 2.
+
+
+=item *
+
+--help
+
+Prints a usage message and exits.
+
+=back
+
+Both PGM and PPM images supported, but both files must be the same type.
+The I<benign.pp> and I<evil.pp> pictures must have the same number of pixels,
+but dimensions can vary. The stegan output will use the I<benign.pp> dimensions.
+
+The C<pnmchdim> tool can be usaged to massage one file type into another,
+if the two require the same number of bits to represent.
+
+=head1 SEE ALSO
+
+C<ppmlowbit> - extract an image from the lowbits of an image
+
+C<pnmchdim> - change dimensions or type of a PBM/PGM/PPM file
+
+=head1 COPYRIGHT
+
+Copyright 2005 by Eli the Bearded / Benjamin Elijah Griffin.
+Released under the same license(s) as Perl.
+
+=head1 AUTHOR
+
+Eli the Bearded wrote the C<ppmstegan>, C<ppmlowbit>, and C<pnmchdim>
+set of tools to examine a demo steganographic image.
+
+=head1 CPAN INFO
+
+=head1 SCRIPT CATEGORIES
+
+Image
+
+=head1 README
+
+ppmstegan - merge two images stegangraphically
+
+=head1 PREREQUISITES
+
+This uses the C<strict>, C<vars>, and C<Image::PPMlib> modules.
+
+=head1 COREQUISITES
+
+The C<ppmlowbit> and C<pnmchdim> scripts are recommended.
+
+=head1 OSNAMES
+
+Should be OS independent.
+
+=cut
+

@@ -1,0 +1,55 @@
+#!/usr/bin/perl -w
+# Vectorizes an image, after Randal L. Schwartz's image duplication
+# algorithm. GIF, JPEG, and PNG are identified by suffix and converted
+# to a 4x4 image at pnm max depth 255, and the image portion of it gets
+# base64 encoded.
+#
+# No coverstion to RGB is forced for grayscale images.
+#
+# 6 Jan 2006		Benjamin Elijah Griffin
+use strict;
+use vars qw( $in $out $suf $raw %sufmap $app );
+use MIME::Base64;
+
+%sufmap = (
+  '.gif'  => 'giftopnm',
+  '.png'  => 'pngtopnm',
+  '.jpg'  => 'djpeg',
+  '.jpeg' => 'djpeg',
+);
+
+REDO:
+
+$in = shift;
+if(!defined($in) or (! -f $in)) {
+  die "$0: usage mkvector imagefile\n";
+}
+
+if ($in =~ m:([.][^.]+)$:) {
+  $suf = lc($1);
+  $app = $sufmap{$suf};
+}
+
+if(!defined($app)) {
+  warn "$0: don't know decoder for $in\n";
+  goto END;
+}
+
+if(!open(VE, "$app $in | pnmscale -x 4 -y 4 | pnmdepth 255|tail +4 |")) {
+  die "$0: tool chain error: $!\n";
+}
+
+$raw = '';
+while(<VE>) { $raw .= $_ };
+close VE;
+
+$out = encode_base64($raw);
+
+$out =~ s/\s+$/\t$in\n/;
+print $out;
+
+END:
+if(@ARGV) {
+goto REDO;
+}
+__END__

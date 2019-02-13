@@ -1,0 +1,25 @@
+#!/bin/ksh
+# Make an ascii art picture of some photo.
+#
+# Benjamin Elijah Griffin	07 March 2001
+
+outwidth=200
+prescale=80
+
+infile=$1
+outfile=$2
+
+if [ ! -f "$infile" ] ; then
+  echo "$0: usage"
+  echo "	asciiversion infile outfile.pgm"
+  echo ""
+  echo "Converts an input image into ascii art, then makes a pgm file of"
+  echo "that ascii art."
+  exit 1
+fi
+
+anytopnm $infile | pnmscale -w $prescale | ppmtopgm | pgmnorm | \
+        pgmtopbm | pbmtoascii | pbmtext -builtin fixed | pnmcrop | \
+	pnmscale -w $outwidth | pgmnorm > $outfile
+
+exit 0

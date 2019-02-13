@@ -1,0 +1,201 @@
+#!/usr/bin/perl -w
+# Convert PGM to ASCII art.
+# Benjamin Elijah Griffin	27 Dec 1999
+use strict;
+use integer;
+use vars qw( $in $type $x $y $max $id %map $custommap $i $last );
+
+$id = $0;
+$id =~ s:.*/::;
+
+$custommap = 0;
+%map = (
+ # The keys are the letter 'd' followed by a decimal number of a character.
+ # Alternatively the raw character can be used, but the 'd' form will
+ # override if both are defined.
+# d000 => ' ',	# 00
+# d051 => '.',	# 33
+# d102 => ':',	# 66
+# d153 => 'I',	# 99
+# d204 => 'V',	# cc
+# d255 => 'M',	# ff
+  d000 => ' ',
+  d016 => '.',
+  d032 => ',',
+  d048 => ';',
+  d064 => '+',
+  d080 => 'x',
+  d096 => 'z',
+  d112 => 'm',
+  d128 => 'X',
+  d144 => 'Y',
+  d160 => 'U',
+  d186 => 'C',
+  d202 => 'O',
+  d218 => 'M',
+  d234 => 'W',
+  d256 => '%',
+);
+
+# Fill in holes.
+$last = ' ';
+for ($i = 0; $i < 256; $i++) {
+  $i = sprintf("%03d", $i);
+  if (defined($map{"d$i"})) {
+    $last = $map{"d$i"};
+  } else {
+    $map{"d$i"} = $last;
+  }
+}
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  my $arg = $1; shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+  } elsif ($arg eq 'm' or $arg eq '-map') {
+    &readmap($ARGV[1]);
+  }
+}
+
+# Add to map the character versions of the numerical mappings.
+my @map = keys %map;
+foreach (@map) {
+  s/^d//;
+  $map{chr($_)} = $map{"d$_"};
+}
+
+if ($ARGV[0]) {
+  open(STDIN,"< $ARGV[0]") or die "$id: Can't open '$ARGV[0]': $!\n";
+}
+
+$in = '#';
+while($in =~ /^#/) { $in = <STDIN> }
+
+if ($in =~ s/^P([25])\s*//) {
+  $type = $1;
+} else {
+  warn "$id: no portable graymap image file found\n";
+  exit(1);
+}
+
+read(STDIN,$in,1024,length($in));
+
+# Eat comments, if the version allows comments
+if ($type < 4 and $in =~ tr:#:#:) {
+  while ($in =~ s/(^|\cm|\cj)#[^\cj\cm]*([\cm\cj])/$1$2/g) { 
+    read(STDIN,$in,256,length($in));
+  }
+}
+
+if ($in =~ s/^\s*(\d+)\s+(\d+)\s+//) {
+  $x = $1;
+  $y = $2;
+} else {
+  warn "$id: no dimensions found in image\n";
+  exit(1);
+}
+
+if ($in =~ s/^\s*(\d+)\s+//) {
+  $max = $1;
+} else {
+  warn "$id: no max value found in image\n";
+  exit(1);
+}
+
+if ($max != 255 and !$custommap) {
+  warn "$id: Internal map is for 255 grays, this has $max grays\n";
+}
+
+my $done = 0;
+my $col  = 0;
+my $pixel = 0;
+
+my $chr;
+while($done < 2) {
+  if (length($in) < 4) {
+    if (!read(STDIN,$in,1024,length($in))) {
+      $done = 1;
+    } elsif ($type == 2) {
+      # Nuke any leading whitespace if this is a text based PGM file.
+      $in =~ s/^\s+//;
+    }
+  }
+
+  if ($type == 5) {
+    $in =~ s/^(.)//s;
+    $chr = $1;
+  } else {
+    if ($done) {
+      ($chr) = $in =~ s/^(\d+)\s*//s;
+    } else {
+      ($chr) = $in =~ s/^(\d+)\s+//s;
+    }
+    if (!defined($chr)) {
+      warn "$id: Missing gray value!\n";
+      next;
+    }
+    $chr = sprintf("d%03d", $chr);
+  }
+
+  if (!defined($map{$chr})) {
+    my $pchar = $chr;
+    my $new = ' ';
+    if (!($pchar =~ /^d(\d+)/)) {
+      $pchar = sprintf("%03d",$1);
+    }
+    if ($pchar > ($max /2)) {
+      $new = 'M';
+    }
+    warn "$id: Gray $pchar missing from map using <$new>\n";
+    $map{$chr} = $new;
+  }
+
+  print $map{$chr};
+  $pixel ++;
+  $col++;
+  if ($col == $x) {
+    print "\n";
+    $col = 0;
+  }
+  if($done and $in eq '') {
+    $done = 2;
+  }
+  if ($pixel > ($x * $y)) {
+    die "Too many pixels\nin=$in\n" unless $done == 2;
+  }
+}
+
+print "\n";
+exit(0);
+
+print STDERR "\$in = '$in';\n";
+print STDERR "\$x = '$x';\n";
+print STDERR "\$y = '$y';\n";
+print STDERR "\$x*\$y = '" . ($x*$y) ."';\n";
+print STDERR "\$col = '$col';\n";
+print STDERR "\$pixel = '$pixel';\n";
+print STDERR "\$chr = '$chr';\n";
+
+sub usage ($) {
+  my $exit = shift;
+
+  print "$id: usage\n", <<USAGEnotes;
+  	pgmtoascii [option] [file]
+
+Options:
+
+	-h	--help		print this message
+	-m	--map MAPFILE	use MAPFILE for gray to ascii map
+
+USAGEnotes
+
+  exit($exit);
+} # end &usage 
+
+# A really crude way to read in the graymapping file.
+sub readmap ($) {
+  my $file = shift;
+
+  do $file or die "$id: Can't read map: $!\n"
+
+} # end &readmap 

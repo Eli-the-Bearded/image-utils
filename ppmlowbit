@@ -1,0 +1,172 @@
+#!/usr/bin/perl -w
+# Extract low order bits from an image and make those high order bits.
+# Useful for steganographic image extraction, eg from "ppmstegan" output.
+# See also pnmchdim
+#
+# 3 Jan 2005
+use strict;
+use Image::PBMlib;
+use vars qw( $id $in $keepmask $shiftbits $ref @pixels $pixel );
+
+$id = $0;
+$id =~ s:.*/::;
+
+$keepmask  = 3;		# 00000011
+$shiftbits = 6;		# number of zeros above
+
+while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
+  if (($ARGV[0] eq '-b') or ($ARGV[0] eq '--bits')) {
+    shift;
+    $shiftbits = shift;
+    if(!defined($shiftbits) or ($shiftbits !~ /^[1-7]$/)) {
+       print STDERR "$id: -b (--bits) requires a number from 1 to 7\n";
+       exit 2;
+    }
+    $shiftbits = 8 - $shiftbits;
+    $keepmask  = 255 >> $shiftbits;
+    print STDERR "keep: $keepmask	bits: $shiftbits\n";
+  } elsif ($ARGV[0] eq '--help') {
+    print STDERR "$id: usage\n", <<USAGEinfo;
+	ppmlowbit [options] stegan.ppm > evil.ppm
+
+Options:
+ -b --bits  NUM   extract image from NUM low bits of stegan.ppm
+
+PGM and PPM images supported. The output picture will be created with the
+dimensions of the input picture, reguardless of original size. The low bits
+will be shifted to high bits to brighten the image. See pnmchdim.
+
+USAGEinfo
+
+    exit 2;
+  } else {
+    print STDERR "$id: $ARGV[0] not a recognized option, use --help for help\n";
+    exit 2;
+  }
+}
+
+$in = shift;
+
+if(!defined($in)) {
+  die "$id: Missing input file\n";
+}
+if(!open(PPM, "< $in")) {
+  die "$id: Can't open $in: $!\n";
+}
+
+$ref = readppmheader(\*PPM);
+
+if(defined($$ref{error})) {
+  die "$id: PPM error: $$ref{error}\n";
+}
+
+if($$ref{bgp} eq 'b') {
+  die "$id: PPM error: bitmaps do not have enough bits per pixel\n";
+}
+
+# Just dump the same header
+print $$ref{fullheader};
+
+# Read everything
+@pixels = readpixels_raw(\*PPM, $$ref{type},
+		($$ref{width} * $$ref{height}) );
+
+for $pixel (@pixels) {
+  if($$ref{bgp} eq 'g') {
+    print chr((ord($pixel) & $keepmask) << $shiftbits); 
+  } else {
+    print chr((ord($$pixel[0]) & $keepmask) << $shiftbits); 
+    print chr((ord($$pixel[1]) & $keepmask) << $shiftbits); 
+    print chr((ord($$pixel[2]) & $keepmask) << $shiftbits); 
+  }
+}
+exit;
+__END__
+
+=pod
+
+=head1 NAME
+
+ppmlowbit - extract an image from the lowbits of an image
+
+=head1 DESCRIPTION
+
+Very simple steganographic image extraction.
+
+Most basic usage:
+
+	ppmlowbit steganography.ppm > evil.ppm
+
+PGM and PPM input images supported. The output picture will be created with
+the dimensions of the input picture, reguardless of original size. The low
+bits will be shifted to high bits to brighten the image.
+
+The output can be redimensioned with C<pnmchdim>.
+
+=head1 USAGE
+
+Usage:
+
+	ppmlowbit [options] stegan.ppm > evil.ppm
+
+Options:
+
+=over 4
+
+=item *
+
+-b --bits  NUM
+
+Extract evil.pnm from the lower NUM bits of stegan.ppm, defaults to 2.
+
+=item *
+
+--help
+
+Prints a usage message and exits.
+
+=back
+
+The C<pnmchdim> tool can be usaged to massage one file type into another,
+if the two require the same number of bits to represent.
+
+=head1 SEE ALSO
+
+C<ppmstegan> - merge two images stegangraphically
+
+C<pnmchdim> - change dimensions or type of a PBM/PGM/PPM file
+
+=head1 COPYRIGHT
+
+Copyright 2005 by Eli the Bearded / Benjamin Elijah Griffin.
+Released under the same license(s) as Perl.
+
+=head1 AUTHOR
+
+Eli the Bearded wrote the C<ppmstegan>, C<ppmlowbit>, and C<pnmchdim>
+set of tools to examine a demo steganographic image.
+
+=head1 CPAN INFO
+
+=head1 SCRIPT CATEGORIES
+
+Image
+
+=head1 README
+
+ppmlowbit - extract an image from the lowbits of an image
+
+=head1 PREREQUISITES
+
+This uses the C<strict>, C<vars>, and C<Image::PPMlib> modules.
+
+=head1 COREQUISITES
+
+The C<ppmstegan> and C<pnmchdim> scripts are recommended.
+
+=head1 OSNAMES
+
+Should be OS independent.
+
+=cut
+

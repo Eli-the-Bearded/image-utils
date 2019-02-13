@@ -1,0 +1,256 @@
+#!/bin/ksh
+# Make a mosaic from images. 
+# Usage: 
+#	mkmosaic [options] WIDTH HEIGHT image-1 [ image-2 ...]
+# Images are placed left to right, and top to bottom in the mosaic.
+# Options:
+#   -b  N    --border      N   border each image with N pixels
+#   -g  N    --grid        N   use a grid between images of N pixels
+#   -B  C    --bordercolor C   use color C for border (white or black)
+#   -G  C    --gridcolor   C   use color C for grid   (white or black)
+#   -P  C    --padcolor    C   use color C for pading (white or black)
+#   -s       --square          if non-square, use central square
+#   -.       --progress        print dots to mark progress
+#
+# A "border" goes all around each image. A "grid" merely separates
+# images from each other. Using a grid is the only way to get an odd
+# number of pixels between images. 
+#
+# TODO: option to pad each image to a particular size, to better deal
+# with mixed aspect ratios.
+#
+# Benjamin Elijah Griffin		Jan 2008
+
+width=0
+height=0
+border=0
+grid=0
+bcolor=-white
+gcolor=-black
+pcolor=-black
+square=
+progress=
+
+# Cheezy usage script that prints from line two to the line above
+# my name.
+usage () {
+ex $0 <<SCRIPT
+2,/Elijah/- p
+q!
+SCRIPT
+}
+
+# For checking numerical arguments, takes the value, an optional
+# minimum (use empty string for no mimimum), an optional maximum
+# (use empty string for no maximum), and a base error message if
+# there is a problem. 
+checknum () {
+  value="$1"
+  min="$2"
+  max="$3"
+  err="$4"
+
+  case "X$value" in
+  	X-[0-9]*|X[0-9]*) : good ;;
+	*) echo "$err: not a number: '$value'" >&2 ; exit 2 ;;
+  esac
+
+  case "X$min" in
+  	X) : no test ;;
+	*) if expr "$value" \< "$min" > /dev/null ; then
+	     echo "$err: too small: '$value'" >&2 ; exit 2
+	   fi ;;
+  esac
+
+  case "X$max" in
+  	X) : no test ;;
+	*) if expr "$value" \> "$max" > /dev/null ; then
+	     echo "$err: too large: '$value'" >&2 ; exit 2
+	   fi ;;
+  esac
+}
+
+while : ; do
+  case "X$1" in
+   X-.|X--progress) shift
+                    progress=1
+		    ;;
+     X-s|X--square) shift
+                    square=1
+		    ;;
+     X-b|X--border) shift
+                    border=$1
+		    shift
+		    checknum "$border" 0 '' "$0: border needs to be 0 or larger"
+		    ;;
+     X-g|X--grid)   shift
+                    grid=$1
+		    shift
+		    checknum "$grid" 0 '' "$0: grid needs to be 0 or larger"
+		    ;;
+X-B|X--bordercolor) shift
+                    bcolor=-$1
+		    shift
+		    ;;
+  X-G|X--gridcolor) shift
+                    gcolor=-$1
+		    shift
+		    ;;
+   X-P|X--padcolor) shift
+                    pcolor=-$1
+		    shift
+		    ;;
+       X-h|X--help) usage
+		    exit
+		    ;;
+	       X-*) echo "$0 unrecognized argument: $1" >&2 
+	            usage
+		    exit 2 
+		    ;;
+		X*) break
+		    ;;
+  esac
+done
+
+width=$1;   checknum "$width"  1 '' "$0: width needs to be 1 or larger"
+height=$2;  checknum "$height" 1 '' "$0: height needs to be 1 or larger"
+shift; shift;
+
+images=$(( $width * $height ))
+
+checknum $# $images '' "$0: need at least $images images"
+
+mksquare () {
+  in=$1
+
+  thisx=$(pnminfo -x < $in)
+  thisy=$(pnminfo -y < $in)
+
+  if [ $thisx != $thisy ] ; then
+    if expr $thisx \> $thisy > /dev/null ; then
+      diff=$(( $thisx - $thisy ))
+      where=-left
+      keep=-width
+      smaller=$thisy
+    else
+      diff=$(( $thisy - $thisx ))
+      where=-top
+      keep=-height
+      smaller=$thisx
+    fi
+
+    amount=$(( $diff / 2 ))
+    pamcut $where $amount $keep $smaller $in > $in.new
+    mv -f $in.new $in
+  fi
+
+}
+
+# Uses globals $border and $bcolor to add a border to the file passed in
+addborder () {
+  in=$1
+  pnmpad -l $border -r $border -t $border -b $border $bcolor $in > $in.new
+  mv -f $in.new $in
+}
+
+wtest=$(($width - 1))
+htest=$(($height - 1))
+
+# Uses globals $wtest and $rc and to determine if a grid is
+# needed here. Uses globals $grid and $gcolor to add the grid if needed
+# to the file passed in
+addgridrow () {
+  in=$1
+  padargs=
+
+  if expr $cc \< $wtest > /dev/null ; then
+    padargs="$padargs -r $grid"
+  fi
+
+  if [ "X$padargs" != X ] ; then
+    pnmpad $padargs $gcolor $in > $in.new
+    mv -f $in.new $in
+  fi
+}
+
+# Uses globals $htest and $cc and to determine if a grid is
+# needed here. Uses globals $grid and $gcolor to add the grid if needed
+# to the file passed in
+addgridcol () {
+  in=$1
+  padargs=
+
+  if expr $rc \< $htest > /dev/null ; then
+    padargs="$padargs -b $grid"
+  fi
+
+  if [ "X$padargs" != X ] ; then
+    pnmpad $padargs $gcolor $in > $in.new
+    mv -f $in.new $in
+  fi
+}
+
+mkrow () {
+  rowout=/tmp/$$-mos-$rc-out
+  pnmcat -leftright $pcolor $@ > $rowout
+  allrows="$allrows $rowout"
+  dellist="$dellist $rowout"
+  if [ $grid != 0 ] ; then
+    addgridcol $rowout
+  fi
+  if [ "X$progress" = X1 ] ; then
+    echo >&2
+  fi
+}
+
+dellist=
+rowlist=
+allrows=
+rc=0
+cc=0
+
+while expr $images \> 0 > /dev/null ; do
+  this=/tmp/$$-mos-$rc-$cc
+  in=$1 ; shift
+  if anytopnm "$in" > $this 2>/dev/null ; then
+
+    if [ $square = 1 ] ; then
+      mksquare $this
+    fi
+
+    if [ $border != 0 ] ; then
+      addborder $this
+    fi
+
+    if [ $grid != 0 ] ; then
+      addgridrow $this
+    fi
+
+    dellist="$dellist $this"
+    images=$(( $images - 1 ))
+    cc=$(( $cc + 1 ))
+
+    if [ "X$progress" = X1 ] ; then
+      echo .\\c >&2
+    fi
+
+    if expr $cc = $width > /dev/null ; then
+
+      mkrow $rowlist $this
+
+      rc=$(( $rc + 1 ))
+      cc=0
+      rowlist=""
+    else
+      rowlist="$rowlist $this"
+    fi
+    
+  else
+    echo "$0: error with image for $rc,$cc: $in" >&2
+    exit 2
+  fi
+done
+
+pnmcat -topbottom $pcolor $allrows
+
+rm -f $dellist >&2

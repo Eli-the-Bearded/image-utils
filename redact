@@ -1,0 +1,452 @@
+#!/usr/bin/perl -w
+# Take a PNM image and apply random black-out rectangles.
+#
+# 4 Apr 2012
+use strict;
+use Image::PBMlib;
+use vars qw( $filein $fileout %info @pixels %options $rc $id
+	   );
+
+%options = (
+	color => 'black',
+	type => 'mix',
+	verbose => 0,
+);
+
+$id = $0;
+$id =~ s,.*/([^/]+),$1,;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^-c$|^--color/) {
+    $options{color} = shift(@ARGV);
+    if(!defined($options{color})) { usage("Missing a box color"); }
+    next;
+  }
+
+  if(/^-n$|^--number/) {
+    $options{number} = shift(@ARGV);
+    if(!defined($options{number})) { usage("Missing a box number"); }
+    if($options{number} < 1) { usage("Not a valid box number"); }
+    next;
+  }
+
+  if(/^-t$|^--type/) {
+    $options{type} = shift(@ARGV);
+    if(!defined($options{number})) { usage("Missing a box type"); }
+    if($options{number} !~ /^(wide|square|narrow|mix)$/) { usage("Not a valid box type"); }
+    next;
+  }
+
+  if(/^-s$|^--srand/) {
+    $options{srand} = shift(@ARGV);
+    if(!defined($options{srand})) { usage("Missing a srand number"); }
+    if($options{srand} < 1) { usage("Not a valid srand number"); }
+    next;
+  }
+
+  if(/^-v$|^--verbose/) {
+    $options{verbose} = 1;
+    next;
+  }
+
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(!defined($options{srand})) {
+  $options{srand} = (time() ^ $$);
+}
+srand($options{srand});
+
+if(!defined($options{number})) {
+  # gives an number from 1 to 4, baised towards 2-3
+  $options{number} = pickrand(0,2) + pickrand(1,2);
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+readpnmfile( \*STDIN, \%info, \@pixels, 'float' );
+
+if(length($info{error})) {
+  die "$0: input image: $info{error}\n";
+}
+
+$rc = colorcheck(\$options{color}, $info{bgp});
+if(length($rc)) {
+  usage($rc);
+}
+
+if($options{verbose}) {
+  print STDERR "$id: srand is $options{srand}\n";
+  print STDERR "$id: color is $options{color}\n";
+}
+
+process(\%options, \%info, \@pixels);
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+
+writepnmfile( \*STDOUT, \%info, \@pixels );
+exit;
+
+sub process {
+  my $o = shift;	# hash ref
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my $n = $$o{number};
+
+  for ($n = 0; $n < $$o{number}; $n ++) {
+    my $t = $$o{type};
+
+    if($t eq 'mix') {
+      $t = pickrand(0,3);
+      if   ($t == 0) { $t = 'wide'; }
+      elsif($t == 1) { $t = 'square'; }
+      else           { $t = 'narrow'; }
+    }
+
+    if($$o{verbose}) {
+      print STDERR "$id: box $n of $$o{number}, type $t\n";
+    }
+
+    if($t eq 'wide')   { drawbox_wide(  $o, $i, $p); next; }
+    if($t eq 'square') { drawbox_square($o, $i, $p); next; }
+                         drawbox_narrow($o, $i, $p);
+  }
+} # end &process 
+
+sub drawbox_wide {
+  my $o = shift;	# hash ref
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my %box = (
+    color => $$o{color},
+    verbose => $$o{verbose},
+  );
+  
+  # (percent) gives 20 to 58, biased towards 39
+  $box{wide} = 18 + pickrand(1,20) + pickrand(1,20);
+
+  # (percent) gives 4 to 12, biased towards 8
+  $box{tall} = 2  + pickrand(1,5) + pickrand(1,5);
+
+  # (percent) leaves 3% margin
+  $box{top} = pickrand(3, (97 - $box{tall}));
+
+  # (percent) leaves 3% margin
+  $box{left} = pickrand(3, (97 - $box{wide}));
+
+  convertpercents(\%box, $i);
+
+  drawbox(\%box, $p);
+} # end &drawbox_wide 
+
+sub drawbox_square {
+  my $o = shift;	# hash ref
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my %box = (
+    color => $$o{color},
+    verbose => $$o{verbose},
+  );
+  
+  # (percent) gives 10 to 40, biased towards 25
+  $box{wide} = 10 + pickrand(0,15) + pickrand(0,15);
+
+  # (percent) gives -4 to 4, no bias
+  my $delta  = 4  - pickrand(0,8) + pickrand(1,5);
+
+  $box{tall} = $box{wide} + $delta;
+
+  # (percent) leaves no margin
+  $box{top} = pickrand(0, (100 - $box{tall}));
+
+  # (percent) leaves no margin
+  $box{left} = pickrand(0, (100 - $box{wide}));
+
+  convertpercents(\%box, $i);
+
+  drawbox(\%box, $p);
+} # end &drawbox_square 
+
+sub drawbox_narrow {
+  my $o = shift;	# hash ref
+  my $i = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my %box = (
+    color => $$o{color},
+    verbose => $$o{verbose},
+  );
+  
+  # (percent) gives 17 to 39, biased towards 28
+  $box{tall} = 15 + pickrand(1,12) + pickrand(1,12);
+
+  # (percent) gives 4 to 12, biased towards 8
+  $box{wide} = 2  + pickrand(1,5) + pickrand(1,5);
+
+  # (percent) leaves 1% margin
+  $box{top} = pickrand(1, (99 - $box{tall}));
+
+  # (percent) leaves 1% margin
+  $box{left} = pickrand(1, (99 - $box{wide}));
+
+  convertpercents(\%box, $i);
+
+  drawbox(\%box, $p);
+} # end &drawbox_narrow 
+
+sub drawbox {
+  my $o = shift;	# hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my $i;
+  my $j;
+  my $ie = $$o{top} + $$o{tall};
+  my $je = $$o{left} + $$o{wide};
+
+  if($$o{verbose}) {
+    print STDERR "$id: box (top $$o{top}, left $$o{left}) to ($ie, $je)\n";
+  }
+
+  for ($i = $$o{top}; $i < $ie; $i++) {
+    for ($j = $$o{left}; $j < $je; $j++) {
+      $$p[$i][$j] = $$o{color};
+    }
+  }
+} # end &drawbox 
+
+sub convertpercents {
+  my $o = shift;        # hash ref
+  my $i = shift;        # hash ref
+
+  my $val;
+
+  $val = int($$o{top} * $$i{height} / 100);
+  $$o{top} = $val;
+
+  $val = int($$o{left} * $$i{width} / 100);
+  $$o{left} = $val;
+
+  $val = int($$o{tall} * $$i{height} / 100);
+  if(($val + $$o{top}) > $$i{height}) {
+    $val = $$i{width} - $$o{top};
+  }
+  $$o{tall} = $val;
+
+  $val = int($$o{wide} * $$i{width} / 100);
+  if(($val + $$o{left}) > $$i{width}) {
+    $val = $$i{width} - $$o{left};
+  }
+  $$o{wide} = $val;
+} # end &convertpercents 
+
+sub colorcheck {
+  my $c_r   = shift;
+  my $bgp   = shift;
+  my @rgb;
+  my $enc;
+  my $max;
+  my $saveerr;
+
+  if($$c_r eq 'black') {
+    $$c_r = '0.0,';
+  }
+  if($$c_r eq 'white') {
+    $$c_r = '1.0,';
+  }
+  if($$c_r eq 'randomgray') {
+    $$c_r = rand() . ',';
+  }
+  if($$c_r eq 'random') {
+    $$c_r = join(',', rand(), rand(), rand());
+  }
+
+  if($$c_r =~ s/\((\d+)\)//) {
+    $max = $1;
+  } else {
+    $max = 255;
+  }
+
+  if($$c_r =~ m:/:) {
+    $enc = 'hex';
+    @rgb = split(m:/:, $$c_r);
+  } elsif($$c_r =~ m/:/) {
+    $enc = 'dec';
+    @rgb = split(m/:/, $$c_r);
+  } elsif($$c_r =~ m/,/) {
+    $enc = 'float';
+    @rgb = split(m/,/, $$c_r);
+  } else {
+    return "Color $$c_r not in recognized format";
+  }
+
+  if(!defined($rgb[0])) {
+    return "Color $$c_r missing first value";
+  }
+
+  if($bgp eq 'p') {
+    if(!defined($rgb[1])) { $rgb[1] = $rgb[0]; }
+    if(!defined($rgb[2])) { $rgb[2] = $rgb[0]; }
+
+    if($enc eq 'hex') {
+      $saveerr = "Color $$c_r not a valid hex triple";
+      $$c_r = hextripletofloat("$rgb[0]/$rgb[1]/$rgb[2]", $max);
+      if(!defined($$c_r)) {
+        return $saveerr;
+      }
+      return '';
+    }
+
+    if($enc eq 'dec') {
+      $saveerr = "Color $$c_r not a valid dec triple";
+      $$c_r = dectripletofloat("$rgb[0]:$rgb[1]:$rgb[2]", $max);
+      if(!defined($$c_r)) {
+        return $saveerr;
+      }
+      return '';
+    }
+
+    $saveerr = "Color $$c_r not a valid float triple";
+    if($rgb[0] < 0.0 or $rgb[0] > 1.0) {
+      return $saveerr;
+    }
+    if($rgb[1] < 0.0 or $rgb[0] > 1.0) {
+      return $saveerr;
+    }
+    if($rgb[2] < 0.0 or $rgb[0] > 1.0) {
+      return $saveerr;
+    }
+
+    $$c_r = "$rgb[0],$rgb[1],$rgb[2]";
+    return '';
+  } # pixmap color
+
+  if(defined($rgb[1])) {
+    return "Image is not in color, cannot use non-gray color";
+  }
+
+  if($enc eq 'hex') {
+    $saveerr = "Color $$c_r not a valid hex value";
+    $$c_r = hexvaltofloat("$rgb[0]", $max);
+    if(!defined($$c_r)) {
+      return $saveerr;
+    }
+    return '';
+  }
+
+  if($enc eq 'dec') {
+    $saveerr = "Color $$c_r not a valid dec value";
+    $$c_r = decvaltofloat("$rgb[0]", $max);
+    if(!defined($$c_r)) {
+      return $saveerr;
+    }
+    return '';
+  }
+
+  $saveerr = "Color $$c_r not a valid float value";
+  if($rgb[0] < 0.0 or $rgb[0] > 1.0) {
+    return $saveerr;
+  }
+
+  if($bgp eq 'g') {
+    $$c_r = "$rgb[0],";
+    return '';
+  } # graymap gray
+
+  # lastly, bitmap
+  if($rgb[0] > 0.5) {
+    $$c_r = 1;
+  } else {
+    $$c_r = 0;
+  }
+  return '';
+} # end &colorcheck 
+
+# pick a random integer in a manner similar to rolling a die
+sub pickrand {
+  my $min = shift;
+  my $max = shift;
+
+  if(!defined($min)) { $min = 1; }
+  if(!defined($max)) { $max = 6; }
+
+  if($min > $max) {
+    return undef;
+  }
+
+  if($min == $max) {
+    return $min;
+  }
+
+  my $range = ($max - $min);
+
+  my $ans = $min + int(rand($range + 1));
+
+  $ans;
+} # end &pickrand 
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+	redact [ OPTIONS ] [ INPUT [ OUTPUT ] ]
+
+Options:
+	-c COLOR   --color   COLOR	use COLOR for boxes (default black)
+	-n NUM     --number  NUM	draw NUM boxes (default 1 to 4)
+	-t TYPE    --type    TYPE	draw TYPE boxes (default 'mix')
+	-s NUM     --srand   NUM	use NUM as random seed
+	-v         --verbose		be verbose
+
+TYPE can be 'wide' 'square' 'narrow' or 'mix'; square is really square-ish,
+mix is random from the other three types.
+
+COLOR can be one of a few names: 'white' 'black' 'randomgray' or 'random' or
+a specific color or gray in one of these encodings:
+Hex:   gray   XX/         gray w/ max   XX/(max)       0/ black - FFFF/ white
+       color  RR/GG/BB    colow w/ max  RR/GG/BB(max)
+Dec:   gray   XX:         gray w/ max   XX:(max)       0: black - 65535: white
+       color  RR:GG:BB    colow w/ max  RR:GG:BB(max)
+Float: gray   X.X,                                     0.0, black - 1.0, white
+       color  R.R,G.G,B.B
+
+Max is always decimal and must be 1 to 65535, defaulting to 255.
+END_usage
+
+  exit($exit);
+} # end &usage
+
+__END__

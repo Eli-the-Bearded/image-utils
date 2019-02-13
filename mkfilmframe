@@ -1,0 +1,284 @@
+#!/bin/ksh
+# Take a PPM image and put it in a "film" frame
+# usage:
+# 	mkfilmframe [ OPTIONS ] ppmfile > out.ppm
+#
+# Options:
+#  -left	left sprocket holes (compatible with right but not top/bot)
+#  -right	right sprocket holes (compatible with left but not top/bot)
+#  -top		top sprocket holes (compatible with bot but not left/right)
+#  -bot		bottom sprocket holes (compatible with top but not left/right)
+#  -debug	print debug info
+#  -dryrun	don't actually create an image
+#  -num N	number of sprocket holes (per side)
+#  -ratio WxH	sprocket hole width to height ratio
+#  -edge W	width of sprocket hole edge(s)
+#  -frame W	width of non-sprocket hole edges
+#
+# Oct 2010	Eli the Bearded	/ B. Elijah Griffin
+#
+# Still not fully debugged. Sometimes hole distributions don't look good.
+
+lr=
+tb=
+lead=
+trail=
+num=4
+edge=
+frame=
+srcimg=
+debug=
+dryrun=
+
+while : ; do
+  one="$1"
+  two="$2"
+  case "X$one" in
+    X-l|X-left) lr=1; dir=lr; hole_dir=tb;  lead=1 ;;
+    X-r|X-rig*) lr=1; dir=lr; hole_dir=tb; trail=1 ;;
+    X-t|X-top*) tb=1; dir=tb; hole_dir=lr;  lead=1 ;;
+    X-b|X-bot*) tb=1; dir=tb; hole_dir=lr; trail=1 ;;
+
+        X-dry*) dryrun=1 ;;
+        X-deb*) debug=1 ;;
+
+    X-n|X-num*) num=$two   ; shift ;;
+    X-e|X-edg*) edge=$two  ; shift ;;
+    X-f|X-fra*) frame=$two ; shift ;;
+        X-rat*) ratio=$two ; shift ;;
+
+    X) echo "$0: need ppmfile!" >&2 ; exit 2 ;;
+    X*) if [ ! -f "$one" ] ; then
+          echo "$0: $one is not a file!" >&2
+	  exit 2
+        fi
+        srcimg="$one"
+	break
+	;;
+  esac
+  shift
+done
+
+case "X$tb$lr" in
+  X) echo "$0: need to specify at least one edge for sprocket holes" >&2 ; exit 2 ;;
+  X11) echo "$0: can't do horizontal and vertical sprocket holes" >&2 ; exit 2 ;;
+esac
+
+case "X$ratio" in
+  X) case X$tb in X) ratio=4x3 ;; X*) ratio=3x4 ;; esac ;;
+  X[1-9]*x[1-9]*) : good ;;
+  X*) echo "$0: ratio is not in WxH format: $ratio" >&2 ; exit 2 ;;
+esac
+
+# might need $edge $frame, use src_w and src_h to find those
+
+src_w=$(pnminfo --xonly < $srcimg)
+src_h=$(pnminfo --yonly < $srcimg)
+
+case "X$edge" in
+  X[1-9]*) : good ;;
+  X) case X$tb in
+        X)  edge=$(( $src_w / 12 )) ;;
+        X*) edge=$(( $src_h / 12 )) ;;
+     esac
+     ;;
+  X*) echo "$0: invalid edge size: $edge" >&2 ; exit 2 ;;
+esac
+
+case "X$frame" in
+  X[1-9]*) : good ;;
+  X) case X$tb in
+        X)  frame=$(( $src_w / 100 )) ;;
+        X*) frame=$(( $src_h / 100 )) ;;
+     esac
+     ;;
+  X*) echo "$0: invalid frame size: $frame" >&2 ; exit 2 ;;
+esac
+
+# neet to calculate $hole_w $hole_h
+# $strip_t $strip_b $strip_l $strip_r
+# $frame_t $frame_b $frame_l $frame_r
+
+hole_uw=${ratio%x*}
+hole_uh=${ratio#*x}
+if expr $hole_uw \> $hole_uh > /dev/null ; then
+  hole_umax=$hole_uw
+else
+  hole_umax=$hole_uh
+fi
+
+hole_ref=$(( $edge - $frame - $frame ))
+hole_unit=$(( $hole_ref / $hole_umax ))
+hole_w=$(( $hole_unit * $hole_uw ))
+hole_h=$(( $hole_unit * $hole_uh ))
+fudge_r=0
+fudge_b=0
+
+case X$tb in
+  X) case X$lead in  X) frame_l=$frame ;; X*) frame_l=0 ;; esac
+     case X$trail in X) frame_r=$frame ;; X*) frame_r=0 ;; esac
+     frame_t=$frame
+     frame_b=$frame
+
+     edge_used=$(( $hole_w + $frame + $frame ))
+     strip_l=$frame
+     strip_r=$frame
+     if expr $edge_used \> $edge > /dev/null ; then
+       extra=$(( $edge_used - $edge ))
+       strip_l=$(( $frame - $extra ))
+       extra=-$extra
+     else
+       if expr $edge_used \< $edge > /dev/null ; then
+	 extra=$(( $edge - $edge_used ))
+	 strip_l=$(( $frame + $extra ))
+       fi
+     fi
+
+     strip_t=$frame
+     strip_b=$frame
+     onehole=$(( $hole_h + $frame + $frame )) # note frame pad
+     allholes=$(( $onehole * $num ))
+     src_pad=$(( $src_h + $frame + $frame ))
+     strip_unused=$(( $src_pad - $allholes ))
+
+     if expr $strip_unused \< 0 > /dev/null ; then
+       echo "$0: fatal: $num holes needs $allholes size, but we have $src_pad" >&2
+       exit 2
+     fi
+     
+     if expr $strip_unused \> 0 > /dev/null ; then
+       holepad=$(( $strip_unused / $num ))
+       holepad=$(( $holepad + $frame + $frame )) # add back in frame pad
+       strip_t=$(( $holepad / 2 ))
+       strip_b=$(( $holepad - $strip_t ))
+     fi
+
+     recalc=1
+     until [ $recalc = 0 ] ; do
+       onehole_p=$(( $hole_w + $strip_t + $strip_b ))
+       allholes_p=$(( $onehole_p * $num ))
+       strip_unused_p=$(( $src_pad - $allholes_p ))
+
+       if expr $strip_unused_p \< 0 > /dev/null ; then
+	 holepad=$(( $holepad - 1 ))
+         strip_t=$(( $holepad / 2 ))
+         strip_b=$(( $holepad - $strip_t ))
+       else
+	 recalc=0
+       fi
+     done
+
+     if expr $strip_unused_p \> 0 > /dev/null ; then
+       fudge_b=$strip_unused_p
+     fi
+    
+     ;;
+
+  *) case X$lead in  X) frame_t=$frame ;; X*) frame_t=0 ;; esac
+     case X$trail in X) frame_b=$frame ;; X*) frame_b=0 ;; esac
+     frame_l=$frame
+     frame_r=$frame
+
+     edge_used=$(( $hole_h + $frame + $frame ))
+     strip_t=$frame
+     strip_b=$frame
+     if expr $edge_used \> $edge > /dev/null ; then
+       extra=$(( $edge_used - $edge ))
+       strip_t=$(( $frame - $extra ))
+       extra=-$extra
+     else
+       if expr $edge_used \< $edge > /dev/null ; then
+	 extra=$(( $edge - $edge_used ))
+	 strip_t=$(( $frame + $extra ))
+       fi
+     fi
+
+     strip_l=$frame
+     strip_r=$frame
+     onehole=$(( $hole_w + $frame + $frame )) # note frame pad
+     allholes=$(( $onehole * $num ))
+     src_pad=$(( $src_w + $frame + $frame ))
+     strip_unused=$(( $src_pad - $allholes ))
+
+     if expr $strip_unused \< 0 > /dev/null ; then
+       echo "$0: fatal: $num holes needs $allholes size, but we have $src_pad" >&2
+       exit 2
+     fi
+     
+     if expr $strip_unused \> 0 > /dev/null ; then
+       holepad=$(( $strip_unused / $num ))
+       holepad=$(( $holepad + $frame + $frame )) # add back in frame pad
+       strip_l=$(( $holepad / 2 ))
+       strip_r=$(( $holepad - $strip_l ))
+     fi
+
+     recalc=1
+     until [ $recalc = 0 ] ; do
+       onehole_p=$(( $hole_w + $strip_l + $strip_r ))
+       allholes_p=$(( $onehole_p * $num ))
+       strip_unused_p=$(( $src_pad - $allholes_p ))
+
+       if expr $strip_unused_p \< 0 > /dev/null ; then
+	 holepad=$(( $holepad - 1 ))
+         strip_l=$(( $holepad / 2 ))
+         strip_r=$(( $holepad - $strip_l ))
+       else
+	 recalc=0
+       fi
+     done
+
+     if expr $strip_unused_p \> 0 > /dev/null ; then
+       fudge_r=$strip_unused_p
+     fi
+    
+     ;;
+
+esac
+
+if [ X$debug = X1 ] ; then
+  echo The numbers	>&2
+  echo source is $src_w x $src_h	>&2
+  echo holes go $hole_dir, frame and sprockets are $dir	>&2
+  echo frame is $frame, edge is $edge, edge extra is $extra	>&2
+  echo hole ratio is $ratio, size is $hole_w by $hole_h	>&2
+  echo sprocket pad is t $strip_t b $strip_b l $strip_l r $strip_r	>&2
+  echo allholes = $allholes, allholes_p = $allholes_p	>&2
+  echo sprocket fudge is b $fudge_b r $fudge_r	>&2
+  echo frame pad is t $frame_t b $frame_b l $frame_l r $frame_r	>&2
+fi
+
+if [ X$dryrun = X1 ] ; then exit 1; fi
+
+tmpdir=/tmp/film.$$
+mkdir $tmpdir && chmod 700 $tmpdir || exit
+
+pbmmake -white $hole_w $hole_h > $tmpdir/hole.pbm
+pnmpad -black -top $strip_t -bot $strip_b -left $strip_l -right $strip_r \
+	$tmpdir/hole.pbm > $tmpdir/sprocket.pbm
+
+series=
+while expr $num \> 0 >/dev/null ; do
+  series="$series $tmpdir/sprocket.pbm"
+  num=$(( $num - 1 ))
+done
+
+pnmcat -$hole_dir $series > $tmpdir/sprocket-set.pbm
+pnmpad -black -top $frame_t -bot $frame_b -left $frame_l -right $frame_r \
+	"$srcimg" > $tmpdir/frame.ppm
+
+case "X$fudge_r$fudge_b" in
+  X00) : good ;;
+  X*) mv $tmpdir/sprocket-set.pbm $tmpdir/sprocket-set-base.pbm
+      pnmpad -black -bot $fudge_b -right $fudge_r \
+             $tmpdir/sprocket-set-base.pbm > $tmpdir/sprocket-set.pbm
+      ;;
+esac
+
+series=
+if [ x$lead = x1 ] ; then series="$tmpdir/sprocket-set.pbm" ; fi
+series="$series $tmpdir/frame.ppm"
+if [ x$trail = x1 ] ; then series="$series $tmpdir/sprocket-set.pbm" ; fi
+
+pnmcat -$dir $series
+rm -rf $tmpdir
+

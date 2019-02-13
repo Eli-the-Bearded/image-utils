@@ -1,0 +1,21 @@
+#!/bin/ksh
+
+file=$1; shift
+
+case $file in 
+    *.gif|*.GIF|*.Gif) prog=giftopnm ;;
+    *.jpg|*.JPG|*.Jpg) prog=djpeg ;;
+ *.jpeg|*.JPEG|*.Jpeg) prog=djpeg ;;
+    *.xcf|*.XCF|*.Xcf) echo "Can't change XCF to PPM!" ; exit 1;;
+                    *) prog=anytopnm ;; 
+esac
+
+# pnmscale -width 158 | ppmtopgm | pgmnorm | pgmtopbm -thresh
+
+$prog $file | pnmscale -width 158 | ppmtopgm | pgmnorm $@ | pgmtopbm -thresh | pbmtoascii -2x4 > /tmp/asc$$
+
+less /tmp/asc$$
+
+rm /tmp/asc$$
+clear
+exit 0

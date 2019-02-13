@@ -1,0 +1,113 @@
+#!/bin/ksh
+# 2 May 2012
+
+usage () {
+cat <<'End_of_Usage'
+slice of life filter
+selects several narrow bands of an image and flips and combines them.
+
+Usage: sliceoflife [ OPTIONS ] [ INFILE ] > OUTFILE
+
+Options:
+  -h    --horizontal	select rows
+  -v    --vertical	select columns
+  -c N  --copies N	final image has N copies of each band
+  -u N	--use    N	use N bands from original
+  -s S  --size   S	band size
+
+End_of_Usage
+}
+
+dir=v	# vertical
+copies=6
+bands=4
+size=40
+infile=
+
+while : ; do
+  case "X$1" in
+    X-h|X--hori*) dir=h              ; shift ;;
+    X-v|X--vert*) dir=v              ; shift ;;
+    X-c|X--cop*)  shift; copies="$1" ; shift ;;
+    X-u|X--use)   shift; bands="$1"  ; shift ;;
+    X-s|X--size)  shift; size="$1"   ; shift ;;
+
+    X-*) echo "$0: do not recognize option '$1'"
+         usage
+	 exit 2 ;;
+    X?*) case "X$infile" in
+    		X) infile="$1" ; shift ;;
+		X*) echo "$0: what to do with '$1'?"
+		    usage
+		    exit 2 ;;
+	 esac ;;
+    X) break ;;
+  esac
+done
+
+tmpdir=/tmp/lif.$$
+mkdir $tmpdir || exit
+
+cleanup () { rm -rf $tmpdir/ ; } 
+
+dirless=${infile#*/}
+base=${dirless%.*}
+
+use="$tmpdir/baseimg"
+band="$tmpdir/slice"
+section="$tmpdir/section"
+cat $infile > "$use"
+pnminfo -d < "$use" | read wide unused tall
+
+case $dir in
+   v) avail=$(( $wide - $size ))
+      cutop1=-left
+      cutop2=-right
+      flipop=-lr
+      catop=$flipop
+      ;;
+   h) avail=$(( $tall - $size ))
+      cutop1=-top
+      cutop2=-bottom
+      flipop=-tb
+      catop=$flipop
+      ;;
+esac
+
+if [ 1 = $(( $avail < $size )) ] ; then
+  echo "$0: input image too small for $size bands" >&2 
+  cleanup
+  exit 2
+fi
+
+slice=0
+while [ 1 = $(( $slice < $bands )) ] ; do
+  start=$(( $RANDOM % $avail ))
+  pamcut $cutop1 $start $cutop2 $(( $start + $size )) "$use" > $band.$slice
+  pamflip $flipop $band.$slice > $band.$slice.flip
+  slice=$(( $slice + 1 ))
+done
+
+copy=0
+allsect=
+while [ 1 = $(( $copy < $copies )) ] ; do
+  slice=0
+  while [ 1 = $(( $slice < $bands )) ] ; do
+    this=$(( $RANDOM % 4 ))
+    case $this in
+      0) allsect="$allsect $band.$slice" ;;
+      1) allsect="$band.$slice $allsect" ;;
+      2) allsect="$allsect $band.$slice.flip" ;;
+      3) allsect="$band.$slice.flip $allsect" ;;
+    esac
+    slice=$(( $slice + 1 ))
+  done
+
+  copy=$(( $copy + 1 ))
+done
+
+pnmcat $catop $allsect
+
+cleanup
+exit 0
+

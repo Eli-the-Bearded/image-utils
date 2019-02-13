@@ -1,0 +1,74 @@
+#!/bin/ksh
+# April 2018, not tested
+
+usage () {
+  echo "reverse-clip usage:"
+  echo "    reverse-clip [options]"
+  echo ""
+  echo "Reverse a video by exploding and re-encoding"
+  echo ""
+  echo "Options:"
+  echo "  -fps  FPS	use non-standard frames-per-second"
+  echo "  -i    VIDEO	source video"
+  echo "  -o    VIDEO	detination VIDEO"
+  echo "  -k            keep frames"
+  exit
+}
+
+fps=25
+out=video.avi
+in=
+keep=
+
+loop=yes
+while [ $loop = yes ] ; do
+  case "X$1" in
+     X-keep|X-k)
+           shift
+           keep=yes
+	   ;;
+
+     X-fps|X-f)
+           shift
+           fps="$1"
+	   shift
+	   ;;
+
+     X-i|X-in*)
+           shift
+           in="$1"
+	   shift
+	   ;;
+
+     X-o|X-out*) shift
+                 out="$1"
+		 shift
+		 ;;
+
+     X-*) usage ;;
+
+     X) loop=no ;;
+
+     X*) usage ;;
+
+  esac
+done
+
+case  ":$in:" in
+	::) echo "$0: need an input file\n"; exit 2
+	    ;;
+esac
+
+tmpdir=/var/tmp/f.rev.$$
+
+video-explode -in "$in" $tmpdir
+find $tmpdir/ -name 0\* | sort -r > $tmpdir/list
+frames-to-video -list $tmpdir/list -out "$out" -fps "$fps"
+
+if [ "X$keep" == X ] ; then
+  rm -rf $tmpdir
+else
+  echo "Kept frames are in $tmpdir"
+fi
+
+exit

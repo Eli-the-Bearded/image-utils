@@ -1,0 +1,52 @@
+#!/bin/sh
+# Add text to an image. The method is the first thing on the
+# command line. Methods are 'overlay' or 'append'. The image
+# is the next command line argument, the text is the rest.
+# Outputs a PNM file to stdout.
+#
+# Benjamin Elijah Griffin	6 Dec 1999
+
+usage () {
+  script=$1;
+  head -5 $script | tail +1
+  exit 2
+}
+
+if expr $# \< 3 >/dev/null ; then
+  echo "$0: Usage error."
+  usage $0;
+fi
+
+method=$1; shift;
+file=$1; shift;
+
+
+tmpfile=/tmp/im-pnm.$$
+
+pbmtext "$@" > $tmpfile-1
+anytopnm $file > $tmpfile-2
+
+case $method in 
+
+# pnmcomp accepts '-invert' to invert the overlay and
+# '-xoff N' and '-yoff M' to change where the text gets put.      
+	overlay)	pnmcomp $tmpfile-1 $tmpfile-2
+		;;
+
+# pnmcat can place images from top to bottom (-topbottom) or
+# from left to right (-leftright). It can justify images at
+# the top (-jtop), bottom (-jbottom), left (-jleft), or
+# right (-jright). When padding an image to match a longer
+# size the backgound can be white (-white) or black (-black).
+
+	 append)	pnmcat -topbottom -jright -white $tmpfile-2 $tmpfile-1
+		;;
+
+	      *)	echo "$0: $method is not a known method."
+                        rm $tmpfile-1 $tmpfile-2
+	      		usage $0 ;;
+esac
+
+rm $tmpfile-1 $tmpfile-2
+exit 0
+

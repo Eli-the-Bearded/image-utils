@@ -1,0 +1,114 @@
+#!/bin/ksh
+# Split an image into overlapping tiles and make a "contact sheet" of
+# the files.
+# usage: contactsheet [ options ] IMAGE.ppm > OUTPUT.ppm
+#
+# options:
+#   -v	  --verbose	increase verbosity (can be used more than once)
+#   -f    --fudge	fudge the rows so columns are not exact
+#   -e    --exact	don't fudge the rows so columns are not exact
+#   -s    --sprocket	use sprocket holes
+#   -p    --plain	don't use sprocket holes
+#
+# 18 April 2012
+
+exact=no
+style=sprocket
+infile=
+verbose=0
+
+while : ; do
+  case "X$1" in
+    X-p|X--plai*) style=plain ; shift ;;
+    X-s|X--spro*) style=sprocket ; shift ;;
+    X-f|X--fudg*) exact=no ; shift ;;
+    X-e|X--exac*) exact=yes ; shift ;;
+    X-v|X--verb*) verbose=$(( $verbose + 1 )) ; shift ;;
+    X-*) echo "$0: unrecognized option $1"
+         echo "usage: contactsheet [ OPTIONS ] INFILE.ppm > OUTFILE.ppm"
+	 echo "Options:"
+	 echo "  -v    --verbose     increase verbosity (can be used more than once)"
+	 echo "  -f    --fudge       fudge the rows so columns are not exact"
+	 echo "  -e    --exact       don't fudge the rows so columns are not exact"
+	 echo "  -s    --sprocket    use sprocket holes"
+	 echo "  -p    --plain       don't use sprocket holes"
+	 exit 2
+	 ;;
+    X) if [ X = "X$infile" ] ; then 
+         echo "$0: need infile" ; exit 2 
+       else
+         break
+       fi
+       ;;
+    X*) infile="$1" ; shift ;;
+  esac
+done
+
+dir=/tmp/csf.$$
+mkdir $dir || exit
+
+chopverb=
+framverb=
+case $verbose in
+	0) : ;;
+	1) chopverb="-v" ;;
+	2) chopverb="-v -v" ; framver="-debug" ;;
+	*) chopverb="-v -v -v" ; framver="-debug" ;;
+esac
+
+pnmchop $chopverb -o $dir/out- -- "$infile"
+
+row=0
+col=0
+for file in $(ls $dir) ; do
+  case $file in 
+     out-*) nopre=${file#out-}
+            nosuf=${nopre%.*}
+	    x=${nosuf%,*}
+	    y=${nosuf#*,}
+
+	    if [ 1 = $(( $x > $col )) ] ; then
+	      col=$x
+	    fi
+	    if [ 1 = $(( $y > $row )) ] ; then
+	      row=$y
+	    fi
+
+	    case "$style" in
+	    	sprocket)
+		  pnmpad -t 1 -b 1 -l 3 -r 3 $dir/$file > $dir/cel-$nopre
+	    	  mkfilmframe $framverb -t -b -n 5 $dir/cel-$nopre > $dir/fram-$nopre
+		  ;;
+	    	plain)
+		  pnmpad -t 3 -b 3 -l 3 -r 3 $dir/$file > $dir/fram-$nopre
+		  ;;
+	    esac
+	    ;;
+  esac
+done
+
+# If you don't have 'nums' you can use GNU seq. nums will infer the
+# format for output from the first number, seq requires you to specify
+# it. Here you would want $(seq -f %03.0f 001 $row)
+for r in $(nums 001-$row) ; do
+  # add a small amount of fudge so rows don't line up perfectly
+  case "$exact" in
+  	no)
+	    case $r in
+	      *1|*6) left=2 ; right=8 ;;
+	      *2|*7) left=5 ; right=5 ;;
+	      *3|*8) left=1 ; right=9 ;;
+	      *4|*9) left=3 ; right=7 ;;
+	      *5|*0) left=4 ; right=6 ;;
+	    esac
+	;;
+  	*) left=5 ; right=5 ;;
+  esac
+
+  pnmcat -lr $dir/fram-*,$r.* | pnmpad -l $left -r $right -t 2 -b 2 > $dir/row-$r.pnm
+done
+
+pnmcat -tb $dir/row-*.pnm
+
+rm -rf $dir/
+

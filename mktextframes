@@ -1,0 +1,102 @@
+#!/usr/bin/perl -w
+# Take a text file and reformat the text to fill N blocks
+# of WxH characters. Optionally can squeeze out white space.
+# There will be up to H-1 lines of overlap between frames.
+#
+# Usage:
+#    mktextframes -i INPUT -p OUTPREFIX -n FRAMES -s WxH [ -w ] -o OVERLAP
+# 
+use strict;
+
+use vars qw ( $infile $intext $outpre $wantframes $w $h
+	      $overlap $squeeze @lines
+	    );
+
+$w = 80;
+$h = 24;
+$wantframes = 0;	# one, since we count from zero
+$outpre = 'frame-';
+$squeeze = undef;
+$overlap = 0;
+
+while ( defined($_ = shift(@ARGV)) ) {
+  if( /^-i$/ or /^--input/ ) {
+    $infile = shift(@ARGV);
+    next;
+  }
+
+  if( /^-s$/ or /^--size/ ) {
+    $_ = shift(@ARGV);
+    if( /^(\d+)[\sxX]+(\d+)/ ) { $w = $1; $h = $2; } 
+    else { die "$0: size needs to be WIDTH x HEIGHT, found $_\n"; }
+    next;
+  }
+
+  if( /^-p$/ or /^--outpre/ ) {
+    $outpre = shift(@ARGV);
+    next;
+  }
+
+  if( /^-n$/ or /^--count/ ) {
+    $wantframes = shift(@ARGV);
+    if($wantframes > 0) { $wantframes --; }
+    else { die "$0: need at least one frame of output\n" }
+    next;
+  }
+
+  if( /^-w$/ or /^--white.*squ/ ) {
+    $squeeze = 1;
+    next;
+  }
+
+  if( /^-o$/ or /^--overl/ ) {
+    $overlap = shift(@ARGV);
+    next;
+  }
+
+}
+
+if($overlap >= $h) {
+  die "$0: overlap exceeds (height - 1)\n";
+}
+
+if(defined($infile)) {
+  if(!open(STDIN, "<", $infile)) {
+    die "$0: cannot read input $infile: $!\n";
+  }
+}
+
+$intext = '';
+while(<>) {
+  if($squeeze) { s/\s+//g; } else { chomp; }
+  $intext .= $_;
+}
+
+while(length($intext) > $w) {
+  $_ = substr($intext, 0, $w, '');
+  push(@lines, $_);
+}
+if(length($intext)) { push(@lines, $intext); }
+
+for $_ (0..$wantframes) {
+  my $outfile = sprintf('%s-%03d.txt', $outpre, $_);
+
+  if(!open(OUT, ">", $outfile)) {
+    die "$0: cannot write to $outfile: $!\n";
+  }
+
+  my $s = ($_ * ($h - $overlap));
+  my $e = $s + $h;
+
+  print STDERR "File: $outfile start $s end $e\n";
+  if($e > $#lines) { 
+    warn "$0: warning frame $_ goes past end of input\n";
+  }
+
+  while($s < $e) {
+    $_ = ($lines[$s] ? $lines[$s] : '') . "\n";
+    print OUT;
+    $s ++;
+  }
+  close OUT;
+}

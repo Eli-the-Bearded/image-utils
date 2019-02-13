@@ -1,0 +1,94 @@
+#!/bin/ksh
+# based on rotate.sh from Aug 20, 2010
+# and mkmovie from Sep 27, 2010
+# with 2014 gif animation
+# rotate in 1 degree increments, cropping as we go,
+# then extend all of them to be the same size.
+# usage: 
+#	mkspinner INPUT
+# output:
+#	000.ppm         to 360.ppm		first rotations
+#	000.join.ppm    to 360.join.ppm		size normalized
+#	000.join-8b.gif to 000.join-8b.gif	GIF frames
+#	full.gif				gifsicle full animation
+#	optimized.gif				imagemagick highly optimized
+#						(even frames only)
+# August 2014
+
+# use -1 for clockwise, and 1 for ccw
+angle=-1
+
+input="$1"
+if [ ! -f "$input" ] ; then
+  echo "$0: need input file"
+  exit 2
+fi
+
+anytopnm "$input" > 000.ppm
+
+mx=0
+my=0
+: > playlist.mixed
+
+last=000.ppm
+
+for n in $(nums 001-360); do
+  p=$n.ppm
+  pnmrotate $angle $last | pnmcrop > $p
+
+  x=$(pnminfo -x < $p) ; y=$(pnminfo -y < $p)
+  if expr $x \> $mx >/dev/null ; then mx=$x ; fi
+  if expr $y \> $my >/dev/null ; then my=$y ; fi
+
+  case $n in 
+    *[0])
+      echo "File $n is $x x $y"
+    ;;
+  esac
+
+  last=$p
+  echo $last >> playlist.mixed
+done
+
+echo max x is $mx, max y is $my
+gifs=""		# all
+egifs=""	# even
+
+: > playlist.fixed
+for n in $(nums 001-360); do
+  p=$n.ppm
+
+  pnmcut 0 0 1 1 $p | pamscale -xyfill $mx $my > $n.back.ppm
+  x=$(pnminfo -x < $p) ; y=$(pnminfo -y < $p)
+  x1=$(( $mx - $x )) ; y1=$(( $my - $y ))
+  xp=$(( $x1 / 2 )) ; yp=$(( $y1 / 2 ))
+
+  pnmpaste -r $p $xp $yp $n.back.ppm > $n.join.ppm || echo $p $xp $yp -- $x $y
+  rm $n.back.ppm
+  echo $n.join.ppm >> playlist.fixed
+  mkgif $n.join.ppm 2> /dev/null
+  g="$n.join-8b.gif"
+  gifs="$gifs $g"
+
+  case $n in 
+    *[02468]) egifs="$egifs $g" ;;
+    *[5])
+      ls -lh $g
+    ;;
+  esac
+
+done
+
+echo playlist.mixed has mixed size images
+echo playlist.fixed has fixed size images
+gifsicle -d 1 -l -O3 $gifs > full.gif
+echo full.gif is normal animation of all fixed size images
+echo now making highly optimized animation
+convert -delay 1 $egifs \
+        -ordered-dither o8x8,8 \
+	        -coalesce -layers OptimizeTransparency \
+		        optimized.gif
+ls -lh full.gif optimized.gif
+
+
+# ffmpeg -r 12 -b 1500 -i %03d.join.ppm test1500.mp4

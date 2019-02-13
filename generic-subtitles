@@ -1,0 +1,35 @@
+#!/usr/bin/perl -w
+# create a generic.srt subtitles file for mplayer
+#    perl  generic-subtitles > generic.srt
+#    mplayer -sub generic.srt MOVIE
+
+$start=1;
+$end=6000;
+
+# basically from "minutes"
+sub secs_to_hhmmss {
+  my $value = shift;
+  my $out = '';
+  #           hour   mm  ss
+  my @mult = (60*60, 60, 1);
+  while($value > 0) {
+    my $col = shift(@mult);
+    if($col <= $value) {
+      my $pos = int($value / $col);
+      $value -= $pos * $col;
+      $out .= sprintf("%02d:", $pos);
+    } else {
+      $out .= "00:";
+    }
+  }
+  chop $out;
+  $out;
+}
+
+my $i = 1;
+while ($i <= $end) {
+  my $t = secs_to_hhmmss($start);
+  print "$i\n$t,000 --> $t,990\nAt timestamp $t now\n\n";
+  $i ++;
+  $start ++;
+}

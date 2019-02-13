@@ -1,0 +1,17 @@
+perl -we '
+   sub start{
+     my $c = shift;
+     my $h=0;
+     my $o=$c;
+     while($c>31){
+       $h+=16;
+       $c-=32;
+   }
+   my $w=$c*8;
+   #              left top width height
+   print "pnmcut  $w   $h  8     16 < pcfont.ppm > c$o.ppm\n"
+   }
+   for($n=0;$n<256;$n++){
+     start(sprintf("%03d",$n))
+   }
+ ' > cut.sh

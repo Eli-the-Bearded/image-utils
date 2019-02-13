@@ -1,0 +1,211 @@
+#!/usr/bin/perl -w
+# Take a PPM file and a text file and create an html file with colorized
+# text based on the PPM colors. The text file should have at least as
+# many characters as the PPM file has pixels.
+# Output is html, either HTML 3.2 with <font color> tags or HTML 4
+# with a stylesheet and <span class> tags. A background color can be
+# specified.
+#
+# 6 April 2006		Benjamin Elijah Griffin
+use strict;
+use vars qw( $ppmin $textin $mode $bgcolor $body $css $char $color $title
+	     $id $w $h $p $ppm_r $p_r $text %colors @pixels $lastcolor
+	     $rc $pc $cc $cssc $fontsize
+           );
+use Image::PBMlib;
+
+$id = $0;
+$id =~ s:.*/::;
+
+$title = 'image';
+$bgcolor = 'white';
+$body = $css = '';
+$mode = 'css';
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  my $arg = $1; shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+  } elsif ($arg eq 'h' or $arg eq '-html') {
+    $mode = 'html';
+  } elsif ($arg eq 'c' or $arg eq '-css') {
+    $mode = 'css';
+  } elsif ($arg eq 'b' or $arg eq '-bgcolor') {
+    $bgcolor = shift;
+  } elsif ($arg eq 't' or $arg eq '-title') {
+    $title = shift;
+  } elsif ($arg eq 'f' or $arg eq '-fontsize') {
+    $fontsize = shift;
+  } else {
+    die "$id: unrecognized option: -$arg\n";
+  }
+}
+
+$textin = shift;
+$ppmin  = shift;
+
+if (!defined($textin) or !defined($ppmin)) {
+  die "$id: need two input files: textin ppmin\n";
+}
+if (!(-f $textin) or !(-f $ppmin)) {
+  die "$id: one or more input file does not exist\n";
+}
+
+if(!open(PPM, "< $ppmin")) {
+  die "$id: can't open ppm file $ppmin: $!\n";
+}
+if(!open(TEXT, "< $textin")) {
+  die "$id: can't open text file $textin: $!\n";
+}
+
+$ppm_r = readppmheader(\*PPM);
+
+if(defined($$ppm_r{error})) {
+  die "$id: ppm error $ppmin: $$ppm_r{error}\n";
+}
+
+if($$ppm_r{bgp} ne 'p') {
+  die "$id: ppm error $ppmin: not a pixmap\n";
+}
+
+$w = $$ppm_r{width};
+$h = $$ppm_r{height};
+$p = ($w * $h);
+@pixels = readpixels_raw(\*PPM, $$ppm_r{type}, $p);
+
+{ local $/ = undef; $text = <TEXT>; }
+
+$text =~ tr:\cJ\cM::d;
+
+if($p > length($text)) {
+  die "$id: text error $textin: not enough characters\n";
+}
+
+close TEXT;
+close PPM;
+
+$cc = $pc = $rc = 0;
+while($p_r = shift(@pixels)) {
+  # Grab the first character, and replace it with the empty string
+  $char = substr($text, 0, 1, '');
+  
+  # Don't color spaces
+  if($char !~ /\s/) {
+    $color = sprintf("%02x%02x%02x",
+    		ord($$p_r[0]), ord($$p_r[1]), ord($$p_r[2]));
+
+    if(defined($lastcolor)) {
+      if ($color ne $lastcolor) {
+	&endcolor();
+	&startcolor($color);
+      }
+    } else {
+      &startcolor($color);
+    }
+
+    if ($char =~ /<>&/) {
+      $char =~ s/&/&amp;/;
+      $char =~ s/</&lt;/;
+      $char =~ s/>/&gt;/;
+    }
+  }
+
+  $body .= $char;
+
+  $pc ++;
+  $rc ++;
+
+  if($rc == $w) {
+    $body .= "\n";
+    $rc = 0;
+  }
+}
+
+&endcolor();
+
+print <<"HTMLheader";
+<html>
+<head>
+<title>$title</title>
+HTMLheader
+
+if($mode eq 'css') {
+
+if(defined($fontsize)) {
+  $fontsize = " font-size: $fontsize";
+} else {
+  $fontsize = '';
+}
+
+print <<"CSSheader";
+<style type=text/css><!--
+H1 { font-weight: bold; font-size: 18px }
+Pre { background-color: $bgcolor; border: 1px gray; font-family: courier,monospace;
+      padding: 0px 5px 20px 5px; margin: 10px 5px 10px 15px;$fontsize }
+$css
+--></style>
+</head>
+<body>
+CSSheader
+
+} else {
+
+print <<"BODYheader";
+</head>
+<body bgcolor="$bgcolor">
+BODYheader
+}
+
+print <<"FINISHpage";
+<h1>$title</h1>
+<pre>$body</pre>
+</body>
+</html>
+FINISHpage
+
+exit(0);
+
+sub startcolor($) {
+  $lastcolor = shift;
+
+  if($mode eq 'css') {
+    if(!defined($cssc = $colors{$lastcolor})) {
+      $cssc = sprintf("c%x", $cc);
+      $cc ++;
+      $colors{$lastcolor} = $cssc;
+      $css .= ".$cssc {color:#$lastcolor}\n";
+    }
+    $body .= "<span class='$cssc'>";
+  } else {
+    $body .= "<font color='#$lastcolor'>";
+  }
+} # end &startcolor
+
+sub endcolor() {
+  if($mode eq 'css') {
+    $body .= "</span>";
+  } else {
+    $body .= "</font>";
+  }
+} # end &endcolor
+
+sub usage($) {
+  my $exit = shift;
+
+  print "$id: usage\n", <<USAGEnotes;
+  	colorizeascii [options] textfile ppmfile
+
+Options:
+
+	-h	--help		print this message
+	-t	--title TITLE	use TITLE as html title
+	-c	--css		use CSS for colors
+	-h	--html		use HTML 3.2 for colors
+	-b	--bgcolor COLOR	use COLOR as background color
+	-f      --fontsize SIZE use SIZE as font size (CSS only)
+
+USAGEnotes
+
+  exit($exit);
+} # end &usage 
+

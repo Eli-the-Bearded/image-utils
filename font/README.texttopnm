@@ -1,0 +1,10 @@
+Source files for fonts to use with texttopnm.
+
+8x16 9x16 9x14 are all traditional (eg pre-Windows) IBM style fonts.
+
+Each directory has:
+
+* a PNG example of the complete font
+* a gzipped PPM file of the complete font
+* mkcut  - Perl command used to create `cut.sh`
+* cut.sh - shell script to extract each character from the PPM file

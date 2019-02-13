@@ -1,0 +1,467 @@
+#!/usr/bin/perl -w
+# Take a PNM (pgm is ideal) image and create a Joy Division / 
+# Unknown Pleasures style wave map out of it. The output format
+# is natively in Xfig format. 
+#
+# 23 Mar 2012
+use strict;
+use Image::PBMlib;
+use Image::Xfig;	# coded against pre-release version 0.20
+
+use vars qw( $filein $fileout %info @pixels %figure $fg $bg
+	     $orient $use_wide $use_tall $vert_marg $horz_marg $keep
+	     $overlap $peak
+	   );
+
+$fg        = '#FFFFFF';	# white in xfig format
+$bg        = '#000000';	# black in xfig format
+$orient    = 'landscape';
+$vert_marg = 0.125;
+$horz_marg = 0.125;
+$overlap   = 75;
+$peak      = 5.5;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^-f$|^--foreg/) {
+    $fg = shift(@ARGV);
+    if(!defined($fg)) { usage("Missing a foreground color"); }
+    if(!colorcheck($fg)) { usage("Not a valid foreground color"); }
+    next;
+  }
+
+  if(/^-b$|^--backg/) {
+    $bg = shift(@ARGV);
+    if(!defined($bg)) { usage("Missing a background color"); }
+    if(!colorcheck($bg)) { usage("Not a valid background color"); }
+    next;
+  }
+
+  if(/^-x$|^--width/) {
+    $use_wide = shift(@ARGV);
+    if(!defined($use_wide)) { usage("Missing an image width"); }
+    if($use_wide < 1) { usage("Not a valid image width"); }
+    next;
+  }
+
+  if(/^-y$|^--height/) {
+    $use_tall = shift(@ARGV);
+    if(!defined($use_tall)) { usage("Missing an image height"); }
+    if($use_tall < 1) { usage("Not a valid image height"); }
+    next;
+  }
+
+  if(/^-v$|^--vertical/) {
+    $vert_marg = shift(@ARGV);
+    if(!defined($vert_marg)) { usage("Missing an vertical margin"); }
+    if($vert_marg <= 0.0) { usage("Not a valid vertical margin"); }
+    if($vert_marg >  0.5) { usage("Not a valid vertical margin"); }
+    next;
+  }
+
+  if(/^-h$|^--horizontal/) {
+    $horz_marg = shift(@ARGV);
+    if(!defined($horz_marg)) { usage("Missing an horizontal margin"); }
+    if($vert_marg <= 0.0) { usage("Not a valid horizontal margin"); }
+    if($vert_marg >  0.5) { usage("Not a valid horizontal margin"); }
+    next;
+  }
+
+  if(/^-o$|^--overlap/) {
+    $overlap = shift(@ARGV);
+    if(!defined($overlap)) { usage("Missing an overlap margin"); }
+    if($overlap < 0) { usage("Not a valid overlap margin"); }
+    next;
+  }
+
+  if(/^-m$|^--muliplier/) {
+    $peak = shift(@ARGV);
+    if(!defined($peak)) { usage("Missing a multiplier"); }
+    if($peak < 0) { usage("Not a valid multiplier"); }
+    next;
+  }
+
+  if(/^-k$|^--keep/) {
+    $keep = 1;
+    next;
+  }
+
+  if(/^-p$|^--portrait/) {
+    $orient = 'portrait';
+    next;
+  }
+
+  if(/^-l$|^--landscape/) {
+    $orient = 'landscape';
+    next;
+  }
+
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+figstart(\%figure);
+$figure{orientation}  = ucfirst($orient);
+
+$figure{user_fg_id}   = figaddcolor(\%figure, $fg);
+$figure{user_bg_id}   = figaddcolor(\%figure, $bg);
+
+$figure{user_vmarg}   = $vert_marg;
+$figure{user_hmarg}   = $horz_marg;
+
+$figure{user_overlap} = int($overlap);
+$figure{user_peak}    = $peak;
+
+readpnmfile( \*STDIN, \%info, \@pixels, 'float' );
+
+if($keep) {
+  my $img_aspect;
+  my $pg_aspect;
+
+  if(!$use_wide) { $use_wide = figgetmaxwide(\%figure); }
+  if(!$use_tall) { $use_tall = figgetmaxtall(\%figure); }
+  
+  if(!defined($info{width})) {
+    usage("Input image has no width!", 1);
+  }
+  if(!defined($info{height})) {
+    usage("Input image has no height!", 1);
+  }
+
+  $img_aspect = $info{width} / $info{height};
+  $pg_aspect  = $use_wide / $use_tall;
+
+  # if the page aspect ratio is grater than the image aspect ratio,
+  # the output image is height contstrained
+  if($pg_aspect > $img_aspect) {
+    $use_wide = int( ( $use_tall / $info{height} ) * $info{width} ); 
+  } else {
+    $use_tall = int( ( $use_wide / $info{width} ) * $info{height} ); 
+  }
+
+  if ($use_wide > figgetmaxwide(\%figure)) { print STDERR "DEBUG: too wide\n"; }
+  if ($use_tall > figgetmaxtall(\%figure)) { print STDERR "DEBUG: too tall\n"; }
+}
+
+if($use_wide) {
+  $figure{user_wide} = $use_wide;
+} else {
+  $figure{user_wide} = figgetmaxwide(\%figure);
+}
+if($use_tall) {
+  $figure{user_tall} = $use_tall;
+} else {
+  $figure{user_tall} = figgetmaxtall(\%figure);
+}
+
+addbackground(\%figure);
+
+
+if(length($info{error})) {
+  die "$0: input image: $info{error}\n";
+}
+
+addimage(\%figure, \%info, \@pixels);
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+print figserialize(\%figure);
+exit;
+
+#############################################################
+# Functions
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+  joydivision [ options ] [ INPUTFILE [ OUTPUTFILE ] ]
+ 
+Options:
+    -f COLOR	--foreground COLOR	set foreground (line) color
+    -b COLOR	--background COLOR	set background color
+    -x UNITS	--width      UNITS	max (output) image width
+    -y UNITS	--height     UNITS	max (output) image height
+    -o UNITS    --overlap    UNITS	overlap amount for side black box
+    -v PART	--vertical   PART	part of page for vertical margin
+    -h PART	--horizontal PART	part of page for horizonal margin
+    -m MULT     --muliplier  MULT	multiplier for peaks
+    -k          --keep                  keep image aspect ratio
+    -l          --landscape             page in landscape 
+    -p          --portrait              page in portrait 
+
+Colors should be in hexidecimal RRGGBB format.
+UNITS are xfig standard units: 1200 to the inch (integer).
+PART is a portion of the page: 0.1 would be 10%, must be < 50%
+MULT is how much over (positive real) interline spacing peaks reach.
+
+Default colors are fore FFFFFF, back 000000
+Default margins are 0.125
+Default image width & height are full page (letter sized)
+Default overlap is 75
+Default multiplier is 5.5
+
+The ideal (best looking) input file is small, grayscale, noisy, but with
+a well defined black background. At a minimum try a "ppmtopgm | pnmnorm"
+A "pnminvert" might make the background darker.
+END_usage
+
+  exit($exit);
+} # end &usage
+
+
+# addbackground(\%figure);
+sub addbackground {
+  my $fig = shift;
+  my $id;
+  my %settings;
+  my $wide;
+  my $tall;
+
+  if(ref($fig) ne 'HASH') {
+    return undef;
+  }
+  
+  $id   = ($$fig{'user_bg_id'} or figgetcolor('black'));
+  $wide = $$fig{'user_wide'};
+  $tall = $$fig{'user_tall'};
+
+  %settings = (
+    pen_color => $id,
+    fill_color => $id,
+    depth => $$fig{maxdepth},
+    area_fill => figgetfill('full'),
+    comment => "Full image background 0,0 to $wide,$tall",
+  );
+
+  return figaddbox($fig, \%settings, 0, 0, $wide, $tall);
+} # end &addbackground 
+
+# addimage(\%figure, \%info, \@pixels);
+sub addimage {
+  my $fig = shift;
+  my $inf = shift;
+  my $pix = shift;
+  my $fg;
+  my $bg;
+  my $tall;
+  my $wide;
+  my $left;
+  my $right;
+  my $baseline; 	# zero level for each line
+  my $bottom;
+  my $inc;
+  my $peaks;
+  my $row;
+
+  if(ref($fig) ne 'HASH') {
+    return undef;
+  }
+  if(ref($inf) ne 'HASH') {
+    return undef;
+  }
+  if(ref($pix) ne 'ARRAY') {
+    return undef;
+  }
+  
+  $wide     = $$fig{'user_wide'};
+  $tall     = $$fig{'user_tall'};
+
+  $left     = int($$fig{'user_hmarg'} * $wide);
+  $right    = $wide - $left;
+  $baseline = int($$fig{'user_vmarg'} * $tall); 
+  $bottom   = $tall - $baseline;
+
+  $inc      = int(($bottom - $baseline) / $$inf{height});
+  $peaks    = $$fig{'user_peak'} * $inc;
+
+  if($peaks > $baseline) { $peaks = $baseline - 1; }
+
+  for ($row = 0; $row < $$inf{height}; $row ++) {
+    addline( $fig, $inf, $pix, $row, $left, $right, $baseline, $peaks, $bottom );
+    $baseline += $inc;
+  }
+
+  addcoverup( $fig, $left, $right, $bottom );
+
+  return $row;
+} # end &addimage 
+
+# addline( $fig, $inf, $pix, $row, $left, $right, $baseline, $peaks, $bottom );
+sub addline {
+  my $fig      = shift;
+  my $inf      = shift;
+  my $pix      = shift;
+  my $row      = shift;
+  my $left     = shift;
+  my $right    = shift;
+  my $baseline = shift;
+  my $peaks    = shift;
+  my $bottom   = shift;
+
+  my $pt;
+  my $col;
+  my $val;
+  my $inc;	# width between dots
+  my $offset;	# how far above baseline this dot is
+  my $depth;
+  my $last;
+  my $shift;
+  my $x;
+  my $y;
+  my @points;
+  my %settings;
+
+  $inc = ($right - $left) / $$inf{width};	# note: real value
+  $shift = int($inc / 2);
+  $last = $$inf{width} - 1;
+  
+  push(@points, $left,  $baseline);	# starting point, left end of line
+
+  for ($col = 0; $col <= $last; $col ++) {
+    $pt     = $$pix[$row][$col];
+
+    $val    = calcval($pt, $inf);
+
+    $offset = int($val * $peaks);	# accept int() rounding down
+    $y      = $baseline - $offset;	# towards top of page
+
+    # be extra precise with the left to right pan
+    if($col == 0) {
+      $x    = $left + $shift;
+
+    } elsif ($col == $last) {
+      $x    = $right - $shift;
+    } else {
+      $x    = $left + $shift +
+      		sprintf('%1.0f', ($inc * $col));	# more precise than int()
+    }
+
+    push(@points, $x, $y);
+  } # for col
+
+  push(@points, $right, $baseline);	# right end of line
+  push(@points, $right, $bottom);	# bottom right corner
+  push(@points, $left,  $bottom);	# bottom left corner
+  push(@points, $left,  $baseline);	# back to start
+
+  $fg       = ($$fig{user_fg_id} or getfigcolor("white"));
+  $bg       = ($$fig{user_bg_id} or getfigcolor("black"));
+
+  $depth    = ($row < $$fig{maxdepth}) ? $$fig{maxdepth} - $row - 1: 1;
+
+  %settings = (
+    pen_color => $fg,
+    fill_color => $bg,
+    depth => $depth,
+    area_fill => figgetfill('full'),
+    comment => "\n# Row $row: baseline $baseline, left $left, right $right, bottom $bottom\n" .
+               "# across $last, peaks $peaks, inc $inc, depth $depth",
+  );
+
+  return figaddpolygon($fig, \%settings, \@points);
+} # end &addline 
+
+# addcoverup( $fig, $left, $right, $bottom );
+sub addcoverup {
+  my $fig      = shift;
+  my $left     = shift;
+  my $right    = shift;
+  my $bottom   = shift;
+  my %settings;
+  my @points;
+  my $wide;
+  my $tall;
+  my $ol;
+  my $id;
+
+  if(ref($fig) ne 'HASH') {
+    return undef;
+  }
+  
+  $id   = ($$fig{'user_bg_id'} or figgetcolor('black'));
+  $wide = $$fig{'user_wide'};
+  $tall = $$fig{'user_tall'};
+  $ol   = $$fig{'user_overlap'};
+
+  %settings = (
+    pen_color => $id,
+    fill_color => $id,
+    depth => $$fig{mindepth},
+    area_fill => figgetfill('full'),
+    comment => "\n# U-shaped box to cover side and bottom lines",
+  );
+
+  @points = (
+      0, 0,				# upper left
+      ($left + $ol), 0,			# top line of left side of U
+      ($left + $ol), ($bottom - $ol),	# inner line of left side of U
+      ($right - $ol), ($bottom - $ol),	# upper line of bottom of U
+      ($right - $ol), 0,		# inner line of right side of U
+      $wide, 0,				# upper right
+      $wide, $tall,			# lower right
+      0, $tall,				# lower left
+      0, 0,				# upper left
+  );
+
+  return figaddpolygon($fig, \%settings, \@points);
+} # end &addcoverup 
+
+# $val = calcval($pt, $inf);
+sub calcval {
+  my $pix = shift;
+  my $inf = shift;
+  my $val;
+
+  # expects values to be floating point
+
+  if($$inf{bgp} eq 'p') { # pixmap, pix is 0.0,0.0,0.0 to 1.0,1.0,1.0
+    my $r;
+    my $g;
+    my $b;
+
+    ($r, $g, $b) = split(/,/, $pix, 3);
+    $b =~ s/,//;	# trailing comma can happen
+    $val = ($r + $g + $b) / 3;	# not the ideal conversion, but simple
+
+    return $val;
+  }
+
+  # if($$inv{bgp} eq 'b') { } # bitmap, pix is 0, or 1,
+  # if($$inv{bgp} eq 'g') { } # graymap, pix is 0.0, to 1.0,
+  $val = $pix;
+  $val =~ s/,//;
+
+  return $val;
+} # end &calcval 
+

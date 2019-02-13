@@ -1,0 +1,106 @@
+#!/bin/ksh 
+# Make a tiled image from many smaller images.
+# Usage;
+#  mktiled [ OPTIONS ] img1.ppm img2.ppm ... > out.ppm
+#  -w WNUM 	images wide
+#  -h HNUM 	images tall
+#  -lr		left-to-right first
+#  -tb		top-to-bottom first
+#
+#
+# Oct 2010	Eli the Bearded	/ B. Elijah Griffin
+
+wide=1
+high=1
+order=lr
+
+imglist=
+imgcnt=0
+while : ; do
+  case "$1" in 
+    -w*) wide=$2 ; shift ;;
+    -h*) high=$2 ; shift ;;
+    -l*) order=lr ;;
+    -t*) order=tb ;;
+    --help) head $0 ; exit ;;
+    '') break ;;
+    *) if [ -f "$1" ] ; then
+         imglist="$imglist $1"
+	 imgcnt=$(( $imgcnt + 1 ))
+       else
+         echo "$0: $1 no such file" >&2 
+       fi
+       ;;
+  esac
+  shift
+done
+
+imgneeded=$(( $wide * $high ))
+if expr $imgcnt \< $imgneeded > /dev/null ; then
+  echo "$0: need $imgneeded images for $wide x $high, have $imgct" >&2 
+  exit
+fi
+
+case $order in
+
+lr)
+    rn=0
+    ln=0
+    for img in $imglist ; do
+      old=$(eval echo \$row$rn)
+      eval row$rn=\""$old" "$img"\"
+      ln=$(( $ln + 1 ))
+      if [ $ln = $wide ] ; then
+        ln=0
+	rn=$(( $rn + 1 ))
+	if [ $rn = $high ] ; then
+	  break
+	fi
+      fi
+    done
+
+ ;;
+
+tb)
+    rn=0
+    ln=0
+    for img in $imglist ; do
+      old=$(eval echo \$row$rn)
+      eval row$rn=\""$old" "$img"\"
+      rn=$(( $rn + 1 ))
+      if [ $rn = $high ] ; then
+        rn=0
+	ln=$(( $ln + 1 ))
+	if [ $ln = $wide ] ; then
+	  break
+	fi
+      fi
+    done
+
+ ;;
+
+esac
+
+rn=0
+rowlist=
+ppmlist=
+while expr $rn \< $high > /dev/null ; do
+  collist=
+  these=$(eval echo \$row$rn)
+  out=/tmp/row$rn.ppm
+
+  for img in $these ; do
+    bimg=${img##*/}
+    anytopnm "$img" > "/tmp/$bimg.ppm" 2> /dev/null || echo "$0: $img didn't decode" >&2
+    ppmlist="$ppmlist /tmp/$bimg.ppm"
+    collist="$collist /tmp/$bimg.ppm"
+  done
+
+  pnmcat -lr $collist > $out
+  rowlist="$rowlist $out"
+  rn=$(( $rn + 1 ))
+done
+
+rm -f $ppmlist
+pnmcat -tb $rowlist 
+rm -f $rowlist

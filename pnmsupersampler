@@ -1,0 +1,68 @@
+#!/bin/ksh
+# Takes N pnm images and takes a slice out of the middle of each
+# then pastes them together to get an image about the size of the
+# original image. Simulates the effect of a multishutter supersampler
+# type camera.
+#
+# See pampop9 for a similar tool, in that case a multilens camera.
+
+width=
+slice=
+forceoffset=
+
+args=1
+while [ $args = 1 ] ; do
+  case "$1" in
+  	-w*) width=$2 ; shift ; shift ;;
+  	-s*) slice=$2 ; shift ; shift ;;
+	-o*) forceoffset=$s ; shift ; shift ;;
+	-h*) echo "$0 usage:"
+	     echo "  pnmsupersampler [ options ] image1.ppm image2.ppm [ ... ]"
+	     echo "Options:"
+	     echo " -w WIDTH	use WIDTH for output instead of first image"
+	     echo " -s WIDTH	use WIDTH for slice size instead of fraction output width"
+	     echo " -o XVALUE	use XVALUE for left side of slice offset instead of center"
+	     echo "-w and -s can not be used together."
+	     exit ;;
+	 -*) echo "$0: Use -h for help"; exit 2 ;;
+	  *) args=0 ;;
+  esac
+done
+
+first="$1"
+count=$#
+
+if [ "X$slice" = X ] ; then
+
+  if [ "X$width" = X ] ; then
+    width=$(pnminfo -x < "$first")
+  fi
+
+  slice=$(( $width / $count ))
+
+fi
+
+#echo $count @ $width = $slice
+
+slices=
+pos=1
+while [ "X$1" != X ] ; do
+  
+  if [ "X$forceoffset" = X ] ; then
+    xsize=$(pnminfo -x < "$1")
+    drop=$(( $xsize - $slice ))
+    offset=$(( $drop / 2 ))
+  else
+    offset=$forceoffset
+  fi
+
+  pnmcut -left $offset -width $slice "$1" > "/tmp/slice_$$_$pos.pnm"
+  
+  slices="$slices /tmp/slice_$$_$pos.pnm"
+  pos=$(( $pos + 1 ))
+  shift
+
+done
+
+pnmcat -lr $slices
+rm -f $slices

@@ -1,0 +1,89 @@
+#!/bin/ksh
+# April 2018, command line at end works, briefly tested
+
+usage () {
+  echo "frames-to-video usage:"
+  echo "    frames-to-video [options] -list FILE"
+  echo "or  frames-to-video [options] [frame1 frame2 frame3 ...]"
+  echo ""
+  echo "Reverse a video explode. Turns jpeg files into a video"
+  echo ""
+  echo "Options:"
+  echo "  -fps  FPS	use non-standard frames-per-second"
+  echo "  -list FILE	the frames listed in FILE one per line"
+  echo "  -h    HEIGHT	use HEIGHT instead of image height"
+  echo "  -w    WIDTH	use WIDTH instead of image width"
+  echo "  -o    VIDEO	save to VIDEO file"
+  exit
+}
+
+fps=25
+out=video.avi
+use_h=
+use_w=
+tmp=tmp.frame.list.$$.txt
+list=
+
+loop=yes
+while [ $loop = yes ] ; do
+  case "X$1" in
+     X-fps|X-f)
+           shift
+           fps="$1"
+	   shift
+	   ;;
+
+     X-w)
+           shift
+           use_w="$1"
+	   shift
+	   ;;
+
+     X-h)
+           shift
+           use_h="$1"
+	   shift
+	   ;;
+
+     X-list|X-l)
+           shift
+           cp "$1" $tmp
+	   shift
+	   ;;
+
+     X-o|X-out*) shift
+                 out="$1"
+		 shift
+		 ;;
+
+     X-*) usage ;;
+
+     X) loop=no ;;
+
+     X*) # consume remaining command line
+         echo "$1" >> $tmp
+         shift ;;
+
+  esac
+done
+
+case  ":$use_h:$use_w:" in
+	*::*) frame1=$(head -1 $tmp)
+	      djpeg "$frame1" | head > $tmp.ppm || exit 
+	      if [ "X$use_w" = X ] ; then use_w=$(pnminfo -x < $tmp.ppm); fi
+	      if [ "X$use_h" = X ] ; then use_h=$(pnminfo -y < $tmp.ppm); fi
+	      rm -f $tmp.ppm
+	      ;;
+
+esac
+
+mencoder mf://@$tmp \
+        -mf w=$use_w:h=$use_h:fps=$fps:type=jpg \
+	-ovc copy -oac copy -o "$out"
+
+ls -lh "$out"
+rm -f $tmp
+exit
+
+working command line
+mencoder mf://@revbirth.txt -mf w=400:h=400:fps=25:type=jpg  -ovc copy -oac copy -o suck-birth.avi

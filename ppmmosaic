@@ -1,0 +1,399 @@
+#!/usr/bin/perl -w
+# Expand pixels in a PPM to make mosaic like images.
+#
+# To do: separate color choices for each border.
+#        user-defined pixel manipulation function.
+#
+# Benjamin Elijah Griffin	28 Feb 2003
+use strict;
+use integer;
+use Image::PPMlib;
+use vars qw( $id $arg $err $i $j $k $r $g $b $br $bg $bb $tri
+	     $inforef @line @out $pc $pix $mpix
+             $file $bmode $bpixels $bpT $bpB $bpL $bpR $pixels 
+	     $VERSION
+	   );
+
+$id = $0;
+$id =~ s:.*/::;
+$VERSION = "0.5";
+
+$bmode   = 'none';
+$bpT = $bpB = $bpL = $bpR = 1;
+$pixels  = 10;
+
+while (defined($ARGV[0]) and $ARGV[0] =~ /^-(.*)/) {
+  $arg = $1; # stripped of first hyphen
+  shift;
+  if ($arg eq '-help' or $arg eq '-version' or $arg eq 'v') {
+    &usage(0);
+
+  } elsif ($arg eq 'b' or $arg eq '-border') {
+    $bmode = shift;
+    if ($bmode eq 'none' or $bmode eq 'dark' or $bmode eq 'light') {
+      1; # valid mode that requires no processing now
+    } elsif ($bmode eq 'darker' or $bmode eq 'lighter') {
+      $bmode =~ s/er$//;
+
+    } elsif ($bmode eq 'black') {
+      ($br, $bg, $bb) = (   0,   0,   0 );
+
+    } elsif ($bmode eq 'white') {
+      ($br, $bg, $bb) = ( 255, 255, 255 );
+
+    } elsif ($bmode eq 'red') {
+      ($br, $bg, $bb) = ( 255,   0,   0 );
+
+    } elsif ($bmode eq 'green') {
+      ($br, $bg, $bb) = (   0, 255,   0 );
+
+    } elsif ($bmode eq 'blue') {
+      ($br, $bg, $bb) = (   0,   0, 255 );
+
+    } elsif ($bmode =~ /^fixed:(\d+:\d+:\d+)$/) {
+      $tri = $1;
+      $bmode = 'fixed';
+      ($br, $bg, $bb) = split(/:/, $tri, 3)
+
+    } elsif ($bmode =~ /^fixed:([0-9a-fA-F]{6})$/) {
+      $tri = $1;
+      $bmode = 'fixed';
+      ($br, $bg, $bb) = hextriplettoraw($tri);
+      $br = ord($br);
+      $bg = ord($bg);
+      $bb = ord($bb);
+
+    } else {
+      $err = 1;
+      warn "$id: Invalid mode for -b (--border)\n";
+    }
+
+  } elsif ($arg eq 'e' or $arg eq '-borderpixels') {
+    $bpixels = shift;
+    if ($bpixels =~ /^(\d+),(\d+),(\d+),(\d+)$/) {
+      $bpT = $1;
+      $bpB = $2;
+      $bpL = $3;
+      $bpR = $4;
+      $bpixels = '';
+    }
+    elsif ($bpixels =~ /^[1-9]\d*$/) {
+      $bpT = $bpB = int($bpixels / 2);
+      if ($bpixels % 2) {
+	$bpT ++;
+      }
+      $bpL = $bpT;
+      $bpR = $bpR;
+    }
+    else {
+      $err = 1;
+      warn "$id: Invalid pixel value for -e (--borderpixels)\n";
+    }
+
+  } elsif ($arg eq 'p' or $arg eq '-pixels') {
+    $pixels = shift;
+    if ($pixels !~ /^[1-9]\d*$/) {
+      $err = 1;
+      warn "$id: Invalid pixel value for -p (--pixels)\n";
+    }
+
+  } elsif ($arg eq '-') {
+    last;
+
+  } else {
+    $err = 1;
+    warn "$id: unrecognized argument: -$arg\n";
+  }
+}
+
+if ($err) {
+  die "Use --help for usage\n";
+}
+
+$file = shift;
+
+if(!defined($file)) { $file = '-'; }
+
+if(!open(PPM, "< $file")) {
+  die "$id: Cannot open $file: $!\n";
+}
+
+$inforef = readppmheader(\*PPM);
+
+if ($$inforef{error}) {
+  die "$id: $file: $$inforef{error}\n";
+}
+if ($$inforef{bgp} ne 'p') {
+  die "$id: $file is not a ppm file\n";
+}
+
+# No border overrides any specified border size
+if ($bmode eq 'none') {
+  $bpT = $bpB = $bpL = $bpR = 0;
+}
+
+printf("P6\n%d %d\n%d\n", $$inforef{width}  * ($bpL + $bpR + $pixels),
+                          $$inforef{height} * ($bpT + $bpB + $pixels),
+			  255);
+
+
+# If we can, calculate the border stuff now.
+if($bmode ne 'none') {
+  $pc = $bpL + $bpR + $pixels;	# width of border + cell
+
+  if(($bmode ne 'light') and ($bmode ne 'dark')) {
+    $pix = $Image::PPMlib::decraw{$br} .
+	   $Image::PPMlib::decraw{$bg} .
+	   $Image::PPMlib::decraw{$bb};
+  }
+}
+
+
+# loop i: each line of height
+for ($i = 0; $i < $$inforef{height}; $i ++) {
+  @line = readpixels_dec(\*PPM, $$inforef{type}, $$inforef{width});
+
+  for($k = 0; $k < $bpT + $bpB + $pixels; $k ++) {
+    $out[$k] = '';
+  }
+
+  # loop j: each pixel in the line
+  for($j = 0; $j < @line; $j ++) {
+
+    # figure out per-pixel borders
+    if ($bmode eq 'light') {
+      $br = $line[$j][0] * 11 / 10; # mult by 1.1 with 'use integer'
+      $bg = $line[$j][1] * 11 / 10; # mult by 1.1 with 'use integer'
+      $bb = $line[$j][2] * 11 / 10; # mult by 1.1 with 'use integer'
+      $br = ($br>255)? 255 : $br;
+      $bg = ($bg>255)? 255 : $bg;
+      $bb = ($bb>255)? 255 : $bb;
+
+      $pix = $Image::PPMlib::decraw{$br} .
+	     $Image::PPMlib::decraw{$bg} .
+	     $Image::PPMlib::decraw{$bb};
+    } elsif ($bmode eq 'dark') {
+      $br = $line[$j][0] *  9 / 10; # mult by 0.9 with 'use integer'
+      $bg = $line[$j][1] *  9 / 10; # mult by 0.9 with 'use integer'
+      $bb = $line[$j][2] *  9 / 10; # mult by 0.9 with 'use integer'
+
+      $pix = $Image::PPMlib::decraw{$br} .
+	     $Image::PPMlib::decraw{$bg} .
+	     $Image::PPMlib::decraw{$bb};
+    }
+
+    # if any border, apply top and left now
+    if($bmode ne 'none' and ($bpT or $bpL)) {
+
+      for ($k = 0; $k < $bpT; $k ++) {	# top border, top $bpT rows
+        $out[$k] .= $pix x $pc;
+      }
+
+      for ($k = 0; $k < $pixels; $k ++) {	# left border, after $bpT rpws
+        $out[$k + $bpT] .= $pix x $bpL;
+      }
+    }
+
+    # main pixel body
+    $mpix = $Image::PPMlib::decraw{$line[$j][0]} .
+	    $Image::PPMlib::decraw{$line[$j][1]} .
+	    $Image::PPMlib::decraw{$line[$j][2]};
+    for ($k = 0; $k < $pixels; $k ++) {	# inside main pixel, after $bpT rows
+      $out[$k + $bpT] .= $mpix x $pixels;
+    }
+
+
+    # if any border, apply bottom and right now
+    if($bmode ne 'none' and ($bpB or $bpR)) {
+      
+      for ($k = 0; $k < $bpB; $k ++) {	# bottom border, after $bpT + $pixels
+        $out[$k + $pixels + $bpT] .= $pix x $pc;
+      }
+
+      for ($k = 0; $k < $pixels; $k ++) { # right border, after $bpT rows
+        $out[$k + $bpT] .= $pix x $bpR;
+      }
+    }
+
+  } # end j: per pixel loop
+
+  for($k = 0; $k < $bpT + $bpB + $pixels; $k ++) {
+    # if no border, those strings will still be '' and are safe to print
+    print $out[$k];
+  }
+
+
+  if(@line != $$inforef{width}) {
+    warn "$id: ran out of pixels prematurely\n";
+    last;
+  }
+
+} # for line of height
+
+
+sub usage($) {
+  my $rc = shift;
+
+  print STDERR <<"ProgramUsage";
+$id version $VERSION usage:
+
+  ppmmosaic reads PPM(5) files and makes larger pixelated versions of them,
+  with several border options.
+
+Arguments:
+
+  -b MODE    --border MODE	     MODE can be black, white, red, green,
+  				     blue, fixed:RGB, lighter, darker, or
+				     none. RGB can 6 hex digits or a colon-
+				     seperated decimal triple. 'lighter' and
+				     'darker' are 10% changed from inner pixel
+  -e SIZE    --borderpixels SIZE     make the border be SIZE pixels (total, if
+  				     odd top and left borders will be larger)
+  -e T,B,L,R --borderpixels T,B,L,R  set sizes for Top, Bottom, Left, and
+                                     Right borders
+  -p SIZE    --pixels SIZE	     make the tile be SIZE pixels (plus border)
+  --				     end arguments
+
+bordermode defaults to none, borderpixels defaults to 1, pixels defaults to 10
+Examples:
+
+  ppmmosaic -e 5 -p 20 -b fixed:255:150:200 foo.ppm > new-foo.ppm
+	If foo.ppm was 10x10, the new image will be 250x250, with pink
+	borders 3 pixels on top and left, 2 pixels on bottom and right
+	around each of the original pixels, which will now be 20x20 in
+	size.
+
+  ppmmosaic --borderpixels 2 --border fixed:808080 --pixels 6 bar.ppm \
+  > new-bar.ppm
+  	Image new-bar.ppm will be 8 times larger than bar.ppm with 1 pixel
+	all around gray borders on the 6x6 tiles from bar.ppm, looking
+	something like a mosaic complete with grout.
+
+  ppmmosaic -e 1,0,0,0 --border black --pixels 1 bar.ppm > new-bar.ppm
+  	Image new-bar.ppm will be twice as tall with a black line between
+	each row. If bar.ppm had previously been compressed 50% vertically,
+	it now has an early CRT scan-line look to it.
+ProgramUsage
+  exit $rc;
+}
+
+__END__
+
+=pod
+
+=head1 NAME
+
+ppmmosaic - make mosaic images by expanding pixels into bordered tiles
+
+=head1 DESCRIPTION
+
+ppmmosaic reads PPM(5) files and makes larger pixelated versions of them,
+with several border options. Such images can look like simple block mosaics,
+eg pick a big value for inner pixel size, and small border evenly sized on
+all edges. Or venetian blind effects can be created by having borders in
+one dimension only.
+
+Options:
+
+=over 4
+
+=item *
+
+-b MODE    --border MODE
+
+MODE can be C<black>, C<white>, C<red>, C<green>,
+C<blue>, C<fixed:>I<RGB>, C<lighter>, C<darker>, or
+C<none>.
+
+For fixed color borders, the RGB value can 6 hex digits (eg "99CC33")
+or a colon-seperated decimal triple (eg "153:204:51"). The C<black>,
+C<white>, etc, border options are short hand for C<fixed:000000>,
+C<fixed:FFFFFF>, etc.
+
+The 'lighter' and 'darker' options are 10% changed from inner pixel.
+
+Default is C<none>.
+
+=item *
+
+-e SIZE    --borderpixels SIZE
+
+Makes the border be SIZE pixels total. If SIZE is
+odd, the top and left borders will be larger.
+So C<-e 5> is equivilent to C<-e 3,2,3,2>
+making the top and left borders three pixels,
+and the bottom and right borders two pixels.
+
+Default is equivilent to C<-e 2>.
+
+=item *
+
+-e T,B,L,R   --borderpixels T,B,L,R
+
+Sets the sizes for Top, Bottom, Left, and Right borders
+individually. 
+
+Default is equivilent to C<-e 1,1,1,1>
+
+=item *
+
+-p SIZE    --pixels SIZE
+
+Makes the inner pixel tile be SIZE pixels. The border goes around
+this inner pixel.
+
+Default is C<10>.
+
+=item *
+
+--
+
+Marks the end of the arguments
+
+=item *
+
+--help                 
+
+Show a help message and exit.
+
+=item *
+
+--version              
+
+Same as C<--help>.
+
+=back
+
+=head1 COPYRIGHT
+
+Copyright 2003 by Eli the Bearded / Benjamin Elijah Griffin.
+Released under the same license(s) as Perl.
+
+=head1 AUTHOR
+
+Eli the Bearded originally the Image::PPMlib to make a script
+very much like this one easier to code.
+
+=head1 CPAN INFO
+
+=head1 SCRIPT CATEGORIES
+
+Image
+
+=head1 README
+
+ppmmosaic - make mosaic images by expanding pixels into bordered tiles
+
+=head1 PREREQUISITES
+
+This uses the C<strict>, C<vars>, C<integer>, and C<Image::PPMlib> modules.
+
+=head1 COREQUISITES
+
+None.
+
+=head1 OSNAMES
+
+Should be OS independent.
+
+=cut

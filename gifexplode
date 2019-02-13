@@ -1,0 +1,17 @@
+#!/bin/ksh
+
+in="$1"
+
+# imagemagick version of -U -e :
+#   convert -coalesce "$in" %03d.gif
+# tested with .gif to .png at least....
+
+first=
+gifsicle -U -e "$in"
+for f in "$in".??? ; do
+  new=${f#$in.}.gif
+  mv "$f" $new
+  if [ X$first = X ] ; then first=$new ; fi
+done
+
+echo "Exploded to $first - $new"

@@ -1,0 +1,117 @@
+#!/bin/ksh
+# 24 Feb 2012	Benjamin Elijah Griffin
+
+usage () {
+echo <<"EndUsage"
+Apply a rain drip effect onto a PPM image.
+Usage:
+	apply-rain [options] IN.PPM > OUT.ppm
+Note: Input cannot be STDIN.
+
+Options:
+  general options:
+	-invert		pnminvert the mkrain image
+	-arith		use pamarith to combine images
+	-comp		use pamcomp to combine images
+	-swap		swap order of files to combine tool
+
+  pamcomp options:
+        -opacity N	use N (as 0.N) as opacity value
+
+  pamarith options:
+ 	-mult		use multiply to combine images
+	-sub		use subtract to combine images
+
+  mkrain options:
+	-count	 N	draw N drops in picture
+	-dark    C	use C (0 to 254) as darkest color
+	-length	 N	drop length max is N (min 70% of N)
+	-rseed 	 N	use N as random seed
+	-wrap		drops off bottom should wrap to top
+
+
+Low darkness with pamarith subtract creates very dark output.
+High darkness with pamarith multiply creates very subtle rain.
+EndUsage
+}
+
+tmp=/tmp/rain-ppm-$$
+op=sub
+invert=cat	# no-op
+opacity="-opacity=0.2"
+combine=pamcomp
+count=
+dark=
+length=
+wrap=
+rseed=
+swap=
+in=
+
+while [ "X$1" != X ] ; do
+  case "$1" in
+    -hel*|--hel*) usage; exit ;;
+
+    -mul*|--mul*) op=mult ;;
+    -sub*|--sub*) op=sub  ;;
+
+    -swa*|--swa*) swap="swap" ;;
+    -inv*|--inv*) invert="pnminvert" ;;
+    -com*|--com*) combine="pamcomp" ;;
+    -ari*|--ari*) combine="pamarith" ;;
+
+    -wra*|--wra*) wrap="--dark" ;;
+    -cou*|--cou*) shift; count="--count $1" ;;
+    -len*|--len*) shift; length="--length $1" ;;
+    -rse*|--rse*) shift; rseed="--rseed $1" ;;
+    -dar*|--dar*) shift; dark="--dark $1" ;;
+
+    -opa*|--opa*) shift; opacity="-opacity=0.$1" ;;
+
+    -*) echo "$0: don't know about option $1; use --help for help"
+        exit 2
+	;;
+    ?*) if [ "X$in" = X ] ; then
+          in="$1"
+	else
+          echo "$0: don't know what to do with $1; use --help for help"
+	  exit 2
+	fi
+	;;
+  esac
+
+  shift;
+done
+
+if [ "X$in" = X ] ; then
+  echo "$0: need an input file; use --help for help"
+  exit 2
+fi
+
+mkrainops="$wrap $count $length $rseed $dark"
+pamarithops="-$op"
+pamcompops="$opacity"
+
+case "$combine" in
+	pamcomp) combineops="$pamcompops" ;;
+	pamarith) combineops="$pamarithops" ;;
+esac
+
+x=$(pnminfo -x < "$in")
+y=$(pnminfo -y < "$in")
+
+case "$x:$y" in
+   [1-9]*:[1-9]*) : good ;;
+   *) echo "$0: could not get dimensions for $in";
+      exit 1
+      ;;
+esac
+
+mkrain $mkrainops --height $y --width $x | $invert > $tmp
+if [ X$swap = X ] ; then 
+  $combine $combineops $tmp "$in"
+else
+  $combine $combineops "$in" $tmp
+fi
+rm -f $tmp
+

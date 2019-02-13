@@ -1,0 +1,147 @@
+#!/bin/ksh
+# Make an ascii art picture of some photo. Based on asciiversion2overlay.
+# Output is a ppm file and an html file, both of which have three
+# (red, blue, and green) images superimposed on each other.
+#
+# Benjamin Elijah Griffin	24 March 2010
+# Benjamin Elijah Griffin	07 March 2001
+
+outwidth=800
+prescale=120
+
+infile=$1
+outfile=$2
+htmlout=$outfile.html
+pre=noname
+
+invert=pnminvert
+redcolor='#0ff'	# based on inverting colors in original
+grncolor='#f0f'	# based on inverting colors in original
+blucolor='#ff0'	# based on inverting colors in original
+
+# invert=cat
+# redcolor='#f00'	# non-invert
+# grncolor='#0f0'	# non-invert
+# blucolor='#00f'	# non-invert
+
+if [ ! -f "$infile" ] ; then
+  echo "$0: usage"
+  echo "	asciiversion infile outfile.ppm"
+  echo ""
+  echo "Splits input into three color channels, makes ascii art from each"
+  echo "then colors and combines into an image that ascii art."
+  exit 1
+fi
+
+anytopnm $infile 2>/dev/null | pnmscale -yscale 0.5 | \
+	pnmscale -w $prescale | $invert | ppmtorgb3
+
+for cname in red grn blu ; do
+	pgm=$pre.$cname
+	dropleft=0
+	dropright=0
+	droptop=0
+	dropbottom=0
+
+	case $cname in
+		red) color="$redcolor" ; dropleft=2  ; droptop=2 ;;
+		grn) color="$grncolor" ; dropright=2 ; droptop=2 ;;
+		blu) color="$blucolor" ; dropbottom=3 ;;
+	esac
+
+        pgmnorm $pgm 2>/dev/null | pgmtoascii | \
+	tee text-$cname-$outfile | pbmtext -builtin fixed | \
+	pnmscale -w $outwidth 2>/dev/null | \
+	pgmnorm 2>/dev/null > tmp-$cname-$outfile
+	
+
+	x=$(pnminfo -x < tmp-$cname-$outfile)
+	y=$(pnminfo -y < tmp-$cname-$outfile)
+
+	w=$(( $x - $dropright - $dropleft ))
+	h=$(( $y - $droptop - $dropbottom ))
+	ppmmake "$color" $x $y > tmp-$cname-block
+
+	pamcut $dropleft $dropright $w $h tmp-$cname-$outfile | \
+	pnmpad -white -left $dropright -right $dropleft \
+	       -top $dropbottom -bottom $droptop | \
+	pamarith -max tmp-$cname-block - \
+	> tmp1-$cname-$outfile.ppm
+
+	rm -f tmp-$cname-block tmp-$cname-$outfile
+done
+
+
+pamarith -min tmp1-red-$outfile.ppm tmp1-grn-$outfile.ppm | \
+pamarith -min tmp1-blu-$outfile.ppm - > $outfile
+
+rm -f tmp1-red-$outfile.ppm tmp1-grn-$outfile.ppm tmp1-blu-$outfile.ppm
+
+cat <<OVERLAY_HEAD > $htmlout
+<html>
+<head>
+<title>Overlay</title>
+<style type=text/css><!--
+Body     { background: white; color: black; }
+Pre      { font-size: 10px; }
+#overlay { position: absolute; z-index: 2; }
+#red     { color: $redcolor;   z-index: 3; }
+#green   { color: $grncolor;   z-index: 4; }
+#blue    { color: $blucolor;   z-index: 5; }
+#button  { position: absolute; border: 1px solid black; top: 0; right: 0; z-index: 100; }
+#realign { color: black; text-decoration: none; }
+--></style>
+<script type="text/javascript"><!--
+function alignlayers () {
+ // all divs need to be within a "position: absolute" div
+ r=document.getElementById("red");
+ g=document.getElementById("green");
+ b=document.getElementById("blue");
+
+ ri=document.getElementById("red-inner");
+ riow = ri.offsetWidth;
+ moveunit = 1 + Math.floor( riow / $outwidth );
+
+ movereddown = moveunit;
+ moveredleft = moveunit * -1;
+ b.style.position = "absolute";
+ b.style.top  = movereddown + "px";
+ b.style.left = moveredleft + "px";
+
+ movegreendown = moveunit * -1;
+ movegreenleft = moveunit;
+ g.style.position = "absolute";
+ g.style.top  = movegreendown + "px";
+ g.style.left = movegreenleft + "px";
+
+ movebluedown = moveunit * 3;
+ moveblueleft = 0;
+ b.style.position = "absolute";
+ b.style.top  = movebluedown + "px";
+ b.style.left = moveblueleft + "px";
+}
+--></script>
+</head><body onLoad="alignlayers();">
+<div id="overlay">
+OVERLAY_HEAD
+
+# Needs to not have trailing newline
+printf '<div id="red"><pre id="red-inner">' >> $htmlout
+cat text-red-$outfile >> $htmlout
+printf '</pre></div><div id="green"><pre id="green-inner">' >> $htmlout
+cat text-grn-$outfile >> $htmlout
+printf '</pre></div><div id="blue"><pre id="blue-inner">' >> $htmlout
+cat text-blu-$outfile >> $htmlout
+
+cat <<"OVERLAY_END" >> $htmlout
+</pre></div>
+</div>
+<div id="button"><a href="javascript:alignlayers()" id="realign"
+ >Realign layers</a></div>
+</body></html>
+OVERLAY_END
+
+rm -f text-red-$outfile text-grn-$outfile text-blu-$outfile
+
+printf "HTML version in $htmlout\n"
+exit 0

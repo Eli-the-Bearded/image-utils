@@ -1,0 +1,163 @@
+#!/usr/bin/perl -w
+# Take a PNM image and make a RGB triptych
+#
+# 4 Apr 2012
+use strict;
+use Image::PBMlib2;
+use vars qw( $filein $fileout %info @pixels %options $rc $id
+	   );
+
+
+%options = (
+	verbose => 0,
+);
+
+$id = $0;
+$id =~ s,.*/([^/]+),$1,;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^-v$|^--verbose/) {
+    $options{verbose} = 1;
+    next;
+  }
+
+  if(!defined($filein)) {
+    $filein = $_;
+    next;
+  } elsif (!defined($fileout)) {
+    $fileout = $_;
+    next;
+  } else {
+    usage("What to do with $_?");
+    # never returns
+  }
+
+}
+
+if(defined($filein)) {
+  if(!open(STDIN, "<:raw", $filein)) {
+    usage("Cannot open $filein: $!", 1);
+  }
+}
+
+readpnmfile( \*STDIN, \%info, \@pixels, 'float' );
+
+if(length($info{error})) {
+  die "$0: input image: $info{error}\n";
+}
+
+process(\%options, \%info, \@pixels);
+
+if(defined($fileout)) {
+  if(!open(STDOUT, ">", $fileout)) {
+    usage("Cannot open $fileout: $!", 1);
+  }
+}
+
+writepnmfile( \*STDOUT, \%info, \@pixels );
+exit;
+
+sub process {
+  my $o = shift;	# options hash ref
+  my $i = shift;	# image hash ref
+  my $p = shift;	# array ref to 2d array
+
+  my %oi;		# saved original image ref values
+  my $key;
+  my $r;
+
+  for $key (qw( bgp max width pixels type )) {
+    $oi{$key} = $$i{$key};
+  }
+
+  if($oi{bgp} eq 'b') {
+    $$i{bgp}  = 'p';
+    $$i{type} = '6';
+    $$i{max}  = 255;
+    if($$o{verbose}) {
+      print STDERR "$id: bitmap to pixmap promotion\n";
+    }
+  } elsif($oi{bgp} eq 'g') {
+    $$i{bgp}  = 'p';
+    $$i{type} = '6';
+    if($$o{verbose}) {
+      print STDERR "$id: graymap to pixmap promotion\n";
+    }
+  } else {
+    if($$o{verbose}) {
+      print STDERR "$id: pixmap to pixmap transform\n";
+    }
+  }
+
+  $$i{width} *= 3;
+  $$i{pixels} *= 3;
+  
+  for ($r = 0; $r < $$i{height}; $r ++) {
+    spreadline($oi{bgp}, $oi{width}, $$p[$r]);
+  }
+} # end &process 
+
+sub spreadline {
+  my $bgp = shift;	# we could figure this out, but easier to just get it
+  my $col = shift;	# we could figure this out, but easier to just get it
+  my $l   = shift;	# array ref to 1d array
+
+  my $i;
+  my $r;
+  my $g;
+  my $b;
+
+  # work backwards so we can destructively change values in place
+  for ($i = $col - 1; $i >= 0; $i --) {
+    if($bgp eq 'p') {
+      ($r, $g, $b) = explodetriple($$l[$i]);
+    } else {
+      $r = $g = $b = $$l[$i];
+      if($bgp eq 'b') {
+        $r .= ',';
+        $g .= ',';
+      }
+    }
+
+    $r = $r . '0.0,0.0';
+    $g = '0.0,' . $g . '0.0';
+    $b = '0.0,0.0,' . $b;
+
+    $$l[$i] = $r;
+    $$l[($col + $i)] = $g;
+    $$l[($col + $col + $i)] = $b;
+  }
+  
+} # end &spreadline 
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+	rgbtriptych [ OPTIONS ] [ INPUT [ OUTPUT ] ]
+
+Options:
+	-v         --verbose		be verbose
+
+Takes a PNM file and makes a RGB triptych out of it. RGB images
+will have the channels separated and used for each image. Non-RGB
+images will use the gray image for each.
+END_usage
+
+  exit($exit);
+} # end &usage
+
+__END__

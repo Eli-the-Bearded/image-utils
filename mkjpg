@@ -1,0 +1,59 @@
+:
+# Automate making jpgs
+# by Benjamin Elijah Griffin 	24 Sep 1999
+
+usage () {
+
+cat <<EndUsage
+$0: usage
+  Options
+  	-O	don't optimize
+	-P	don't make progressive (interlaced)
+	-s	simpler filename
+	-q N	compress at quality N (default 75)
+EndUsage
+
+exit
+}
+
+opt=-optimize
+pro=-progressive
+qual=75
+simple=no
+loop=yes
+while [ X$loop != X ] ; do
+
+  case "$1" in 
+  	-O) shift; opt= ;;
+  	-P) shift; pro= ;;
+  	-q) shift; qual=$1; shift ;;
+	-s) shift; simple=yes ;;
+    --help) usage ;;
+	-*) echo "$1 unrecognized option"; usage ;;
+	'') echo "Insufficent arguments"; usage ;;
+	 *) loop= ;;
+  esac
+
+done
+
+if [ $simple = yes ] ; then
+  ex=
+else
+  ex=-${qual}
+  if [ X$pro != X ] ; then ex=${ex}p ; fi
+  if [ X$opt != X ] ; then ex=${ex}o ; fi
+fi
+ex=${ex}.jpg
+
+for each ; do
+  case $each in
+  	*.tif|*.tiff) new=${each%%.tif*}$ex ; tool=tifftopnm ;;
+	*.jpg|*.jpeg) new=${each%%.jp*g}$ex ; tool=djpeg ;;
+	  *.p[bgpn]m) new=${each%%.p[bgpn]m}$ex ; tool=cat ;;
+	       *.xcf) echo "Skipping $each (no .xcf converter)" ; next ;;
+	         *.*) new=${each%.*}$ex ; tool=anytopnm ;;
+  esac
+  $tool $each | cjpeg $opt $pro -quality $qual > $new
+  echo $new done
+done
+

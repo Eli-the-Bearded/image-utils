@@ -1,0 +1,46 @@
+#!/bin/ksh
+# usage:
+#	mktileimage X Y ppmfile
+# From a single ppm tile, make an image repeating that tile X wide and Y tall.
+# 
+# Benjamin Elijah Griffin	August 2009
+
+x=$1
+y=$2
+ppm="$3"
+tmp="/tmp/$$-tiled.ppm"
+
+usage () {
+  echo "usage: mktiledimage X Y ppmfile > outfile"
+  echo "Tiles a single ppm (or pgm / pbm) X wide and Y tall"
+  exit 1
+}
+
+case "x$x" in
+	x[1-9]*) : okay ;;
+	x*) usage ;;
+esac
+case "y$y" in
+	y[1-9]*) : okay ;;
+	y*) usage ;;
+esac
+if [ -f "$ppm" ] ; then : okay ; else usage ; fi
+
+count=0
+wide=""
+while expr $count \< $x >/dev/null ; do
+  wide="$wide $ppm"
+  count=$(( $count + 1 ))
+done
+
+pnmcat -lr $wide > $tmp
+
+count=0
+tall=""
+while expr $count \< $y >/dev/null ; do
+  tall="$tall $tmp"
+  count=$(( $count + 1 ))
+done
+
+pnmcat -tb $tall 
+rm -f $tmp

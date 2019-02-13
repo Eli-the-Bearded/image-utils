@@ -1,0 +1,85 @@
+#!/usr/bin/perl -w
+# Make many mosaics
+use strict;
+use vars qw( $imgbase $outbase @images $list $count $prefix $width $height $each 
+             $set $info $mosaictool $exiftool $mailtool $date );
+
+$imgbase="/dell/scratch/image-cds";
+$outbase="/var/tmp/FLICKR";
+$mosaictool="mkmosaic --square --padcolor white --grid 2 --gridcolor white ";
+$exiftool="exiftool -overwrite_original -Creator='Eli the Bearded' -CreatorTool='mkmosaic' -Model='Ye Random Camera v17' -keywords=mkmosaic -keywords=exiftool ";
+$mailtool="flickr-email -p private ";
+
+$count=shift;
+$width=shift;
+$height=shift;
+$prefix=shift;
+$list=shift;
+
+if(!-f $list) {
+  die "$0: usage: mkmany NUM WIDTH HEIGHT PREFIX LISTFILE\n";
+}
+
+$date=qx(date +"%Y:%m:%d %H:%M:%S");
+
+$each = $width * $height;
+
+if(!open(IN,"< $list")) {
+  die "$0: $list: $!\n";
+}
+@images = <IN>;
+
+# from perlfaq
+sub fisher_yates_shuffle {
+  my $deck = shift;  # $deck is a reference to an array
+  my $i = @$deck;
+
+  while ($i--) {
+    my $j = int rand ($i+1);
+    @$deck[$i,$j] = @$deck[$j,$i];
+  }
+}
+
+chdir($imgbase) || exit;
+
+print "Shuffle start\n";
+fisher_yates_shuffle(\@images);
+print "Shuffle done\n";
+
+my $i;
+for ($i = 1; $i <= $count; $i ++) {
+  $set = "";
+  $info = "";
+
+  my $j;
+  my $use;
+  for ($j = 1; $j <= $each; $j ++) {
+    $use = shift(@images);
+    $set .= " $use";
+    chomp ($set);
+    $info .= "$j: $use";
+  }
+
+
+  my $thisimg  = "$outbase/mosaics/$prefix-$i.jpg";
+  my $thisinfo = "$outbase/mosaics/$prefix-$i.txt";
+  my $thismail = "$outbase/mail/$prefix-$i.mail";
+  my $command = "$mosaictool $width $height $set | cjpeg -q 85 > $thisimg";
+  #printf("RUN: '$command'\n");
+  print "$thisimg\n";
+  if(!open(INFO, "> $thisinfo")) {
+    die "$0: cannot write to $thisinfo: $!\n";
+  }
+  print INFO $info;
+  close INFO;
+  system($command);
+
+  $command = "$exiftool -ImageDescription='$info' -Date='$date' -keywords='$prefix' -keywords=${width}x$height $thisimg";
+  system($command);
+
+  $command = "$mailtool $thisimg | tee $thismail | /usr/sbin/sendmail -oi -t";
+  system($command);
+  print "$thismail\n";
+
+  sleep 15;
+}

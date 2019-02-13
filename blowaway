@@ -1,0 +1,153 @@
+#!/bin/ksh
+# Split an image into square tiles and progressively rotate them
+# then join those back together for a many scraps of paper starting
+# to blow away effect.
+# usage: blowaway [ options ] IMAGE.ppm > OUTPUT.ppm
+#   -v	  --verbose	increase verbosity (can be used more than once)
+#   -n	  --neutral	neutral background
+#   -w	  --white	white background
+#   -b	  --black	black background
+#   -f A  --factor A	rotation angle factor A, defaults to -1.1
+#   -s S  --size   S    tile size S, defaults to 25
+# 19 April 2012
+
+dir=/tmp/baf.$$
+mkdir $dir || exit
+
+infile=
+color=-background=white
+factor=-1.1
+size=25
+verbose=0
+
+while : ; do
+
+  case "X$1" in
+    X-w|X--whit*) color=-background=white     ; shift ;;
+    X-b|X--blac*) color=-background=black     ; shift ;;
+    X-n|X--neut*) color=                      ; shift ;;
+    X-f|X--fact*) shift; factor="$1"          ; shift ;;	
+    X-s|X--size*) shift; size="$1"            ; shift ;;	
+    X-v|X--verb*) verbose=$(( $verbose + 1 )) ; shift ;;
+    X-*) echo "$0: unrecognized option $1"
+         echo "usage: blowaway [ OPTIONS ] INFILE.ppm > OUTFILE.ppm"
+	 echo "Options:"
+	 echo "  -v    --verbose     increase verbosity (can be used more than once)"
+         echo "  -n    --neutral     neutral background"
+         echo "  -w    --white	     white background"
+         echo "  -b    --black       black background"
+         echo "  -f A  --factor A    rotation angle factor A, defaults to -1.1"
+         echo "  -s S  --size   S    tile size S, defaults to 25"
+	 exit 2
+	 ;;
+    X) if [ X = "X$infile" ] ; then 
+         echo "$0: need infile" ; exit 2 
+       else
+         break
+       fi
+       ;;
+    X*) infile="$1" ; shift ;;
+  esac
+done
+
+case "X$factor" in
+	X[1-9]*) : good ;;
+	X-[1-9]*) : good ;;
+	X*) echo "$0: need real numerical angle factor" ; exit 2 ;;
+esac
+
+case "X$size" in
+	X[1-9]*) : good ;;
+	X*) echo "$0: need positive integer size" ; exit 2 ;;
+esac
+
+chopverb=
+case $verbose in
+	0) : ;;
+	1) chopverb="-v" ;;
+	2) chopverb="-v -v" ;;
+	*) chopverb="-v -v -v" ;;
+esac
+
+pnmchop $chopverb -n -w $size -r 1x1 -o $dir/out- -- "$infile"
+
+row=0
+col=0
+for file in $(ls $dir) ; do
+  case $file in 
+     out-*) nopre=${file#out-}
+            nosuf=${nopre%.*}
+	    x=${nosuf%,*}
+	    y=${nosuf#*,}
+
+	    if [ 1 = $(( $x > $col )) ] ; then
+	      col=$x
+	    fi
+	    if [ 1 = $(( $y > $row )) ] ; then
+	      row=$y
+	    fi
+
+	    if [ 1 = $(( $y > $x )) ] ; then
+	      max=$y
+	    else
+	      max=$x
+	    fi
+
+            max=$(( $max - 1 ));
+
+
+	    case $max in
+		0) mv $dir/$file $dir/tile-$nopre
+		   
+		   if [ 1 == $(( $verbose > 1 )) ] ; then
+		     echo "mv $dir/$file $dir/tile-$nopre" >&2
+		   fi
+
+		  ;;
+		*) angle=$(( $max * $factor ))
+		   pnmrotate $color $angle $dir/$file > $dir/rot-$nopre
+
+		   pnminfo -d < $dir/$file      | read size_x notused size_y
+		   pnminfo -d < $dir/rot-$nopre | read this_x notused this_y
+
+		   if [ 1 == $(( $this_x > $size_x )) ] ; then 
+		     start_x=$(( ($this_x - $size_x) / 2 ))
+		     cut_x=$size_x
+		   else
+		     start_x=0
+		     cut_x=$this_x
+		   fi
+
+		   if [ 1 == $(( $this_y > $size_y )) ] ; then 
+		     start_y=$(( ($this_y - $size_y) / 2 ))
+		     cut_y=$size_y
+		   else
+		     start_y=0
+		     cut_y=$this_y
+		   fi
+
+		   
+		   pnmcut -l $start_x -t $start_y -w $cut_x -h $cut_y -pad \
+		   	$dir/rot-$nopre > $dir/tile-$nopre
+
+		   if [ 1 == $(( $verbose > 1 )) ] ; then
+		     echo "pnmrotate $color $angle | pnmcut -l $start_x -t $start_y -w $cut_x -h $cut_y" >&2
+		   fi
+
+		  ;;
+	    esac
+	    ;;
+  esac
+done
+
+# If you don't have 'nums' you can use GNU seq. nums will infer the
+# format for output from the first number, seq requires you to specify
+# it. Here you would want $(seq -f %03.0f 001 $row)
+for r in $(nums 001-$row) ; do
+  # echo row $dir/tile-*,$r.*
+  pnmcat -lr $dir/tile-*,$r.* > $dir/row-$r.pnm
+done
+
+pnmcat -tb $dir/row-*.pnm
+
+rm -rf $dir/

@@ -1,0 +1,354 @@
+#!/usr/bin/perl -w
+# chop an image up into tiles, with optional overlap
+# Specify a tile ratio (default 4x6) and either a tile width
+# or a fraction of image width (default 5). Overlap options:
+#   -f		--force		make sure tiles overlap (default)
+#   -a		--allow		allow tiles to overlap
+#   -n		--none		tiles will never overlap
+#
+# With the "none" option, tiles at edges may not be the same size.
+# With the "force" option, spaces tiles at (fraction of width + 1) apart
+# 17 Apr 2012
+use strict;
+use POSIX;
+use File::Temp qw( tempfile );
+use vars qw( %options %tools $id $rc $out $system $infile $outfile
+             $i $j $x $y $w $t );
+
+%tools = (
+	pnminfo => 'pnminfo',
+	pnmcut  => 'pnmcut',
+);
+
+%options = (
+        verbose => 0,
+	ratio => [4, 6],
+	tilefraction => 5,
+	gridplus => 1,
+	overlap => 'force',
+	prefix => 'chop-',
+);
+
+$id = $0;
+$id =~ s,^/.*/,,;
+
+while( defined($_ = shift(@ARGV) ) ) {
+  if(/^--$/) { last; }
+
+  if(/^-o$|^--output$/) {
+    $options{prefix} = $ARGV[0];
+    if(!defined($options{prefix})) {
+      usage("Prefix must have a string", 2);
+    }
+    shift;
+    next;
+  }
+
+  if(/^-r$|^--ratio$/) {
+    @{$options{ratio}} = $ARGV[0] =~ /^\s*([\d.]+)\s*x\s*([\d.]+)/;
+    if(!defined($options{ratio}[0] or $options{ratio}[1])) {
+      usage("Ratio must be NUMxNUM form", 2);
+    }
+    shift;
+    next;
+  }
+
+  if(/^-t$|^--tilefraction/) {
+    $options{tilefraction} = $ARGV[0];
+    $options{tilewide} = undef;
+    if($options{tilefraction} !~ /^\d+$/) {
+      usage("Tile fraction must be a number", 2);
+    }
+    shift;
+    next;
+  }
+
+  if(/^-w$|^--tilewide/) {
+    $options{tilefraction} = undef;
+    $options{tilewide} = $ARGV[0];
+    if($options{tilewide} !~ /^\d+$/) {
+      usage("Tile wide must be a number", 2);
+    }
+    shift;
+    next;
+  }
+
+  if(/^-p$|^--gridplus/) {
+    $options{gridplus} = $ARGV[0];
+    if($options{gridplus} !~ /^\d+$/) {
+      usage("Gridplus must be a number", 2);
+    }
+    shift;
+    next;
+  }
+
+  if(/^-f$|^--force/) {
+    $options{overlap} = 'force';
+    next;
+  }
+  if(/^-a$|^--allow/) {
+    $options{overlap} = 'allow';
+    next;
+  }
+  if(/^-n$|^--none/) {
+    $options{overlap} = 'none';
+    next;
+  }
+  if(/^-v$|^--verbose/) {
+    $options{verbose} ++;
+    next;
+  }
+
+  if(/^[^-]/ and !defined($infile)) {
+    $infile = $_;
+  } else {
+    usage("What to do with '$_'?", 2);
+  }
+}
+
+if(!defined($infile)) {
+  $infile = shift;
+}
+
+if($options{overlap} eq 'force') {
+  if($options{gridplus} < 1) {
+    usage("Need a grid plus value to force overlap", 2);
+  }
+} else {
+  $options{gridplus} = 0;
+}
+
+if(!defined($infile)) {
+  ($options{fh}, $options{tmpfile}) = tempfile();
+  select($options{fh});
+  $| = 1;
+  while(<STDIN>) {
+    print;
+  }
+
+  $infile = $options{tmpfile};
+}
+
+$system = $tools{pnminfo} . qq( <'$infile' );
+$rc = qx($system);
+
+if($rc =~ /^(p\wm)\s+\w+\s+(\d+)\s*x\s*(\d+)\s/) {
+  $options{suffix} = ".$1";
+  $options{inwide} = $2;
+  $options{intall} = $3;
+} else {
+  die "$id: unexpected output from $system\n";
+}
+
+if($options{tilefraction}) {
+  $options{tilewide} = sprintf('%1.0f', 
+  			($options{inwide} / $options{tilefraction}) );
+} else {
+  $options{tilefraction} = $options{inwide} / $options{tilewide};
+}
+
+$options{tiletall} = sprintf('%1.0f', 
+			( ($options{tilewide} * $options{ratio}[0])
+			   / $options{ratio}[1])  );
+
+$options{gridwide} = ceil( $options{tilefraction} + $options{gridplus} );
+
+
+if($options{overlap} eq 'none') {
+  $options{gridtall} = floor( $options{intall} / $options{tiletall} );
+} else {
+  $options{gridtall} = ceil( $options{intall} / $options{tiletall} );
+}
+
+if($options{overlap} eq 'force') {
+  my $factor = $options{intall} - ( $options{gridtall} * $options{tiletall} );
+     $factor = $factor / $options{tiletall};
+
+  if( ( 1 / $options{tilefraction} ) > $factor ) {
+    $options{gridtall} ++;
+  }
+}
+
+if($options{verbose}) {
+  print STDERR "Input image  $options{inwide} wide x $options{intall} tall\n";
+  print STDERR "Using tiles  $options{tilewide} wide x $options{tiletall} tall\n";
+  print STDERR "Grid spacing $options{gridwide} wide x $options{gridtall} tall\n";
+}
+
+for ($i = 1; $i <= $options{gridwide}; $i ++) {
+  $w = $options{tilewide};
+
+  for ($j = 1; $j <= $options{gridtall}; $j ++) {
+    $t = $options{tiletall};
+
+    ($x, $y) = findstart(\%options, $i, $j);
+
+    if($options{overlap} eq 'none') {
+      # adjust sizes of edge tiles
+
+      if($options{inwide} < ( $x + $w - 0.4 )) {
+        $w = sprintf('%1.0f', ($options{inwide} - $x));
+      }
+
+      if($options{intall} < ( $y + $t - 0.4 )) {
+        $t = sprintf('%1.0f', ($options{intall} - $y));
+      }
+    }
+
+
+    $out = sprintf('%s%03d,%03d%s', $options{prefix}, $i, $j, $options{suffix});
+    $system = sprintf(
+    		qq(pnmcut -le %1.0f -to %1.0f -wi %d --he %d '%s' > '%s'),
+    		$x, $y, $w, $t, $infile, $out
+		);
+
+    if ($options{verbose} > 1) { print STDOUT "$system\n"; }
+    system($system);
+  }
+}
+
+END {
+  if(defined($options{tmpfile})) {
+    close $options{fh};
+    unlink $options{tmpfile};
+  }
+}
+exit;
+
+sub findstart {
+  my $o = shift;	# options hash ref
+  my $i = shift;	# i across (start at 1)
+  my $j = shift;	# j across (start at 1)
+  my $x;
+  my $y;
+
+  if($$o{overlap} eq 'none') {
+    $x = ($i - 1) * $options{tilewide};
+    $y = ($j - 1) * $options{tilewide};
+    return ( $x, $y );
+  }
+
+  my %values = (
+    N => $i,
+    T => $$o{gridwide},
+    W => $$o{inwide},
+    P => $$o{tilewide}
+  );
+
+  $x = findstart_1d(\%values);
+
+  %values = (
+    N => $j,
+    T => $$o{gridtall},
+    W => $$o{intall},
+    P => $$o{tiletall}
+  );
+  $y = findstart_1d(\%values);
+
+  return ( $x, $y );
+} # end &findstart 
+
+sub findstart_1d {
+  my $v = shift;
+
+# Consider an image 100 pixels wide, with tiles 25 pixels wide
+# and a desire to have 5 tiles across.
+#
+# The first tile should start at 0 and go to 25 (centered on 12.5):
+#  .________________________________________________.
+#  |///////////                                     |
+#  |///////////                                     |
+#  :                                                :
+#
+# The last tile should start at 75 and go to 100 (centered on 87.5):
+#  .________________________________________________.
+#  |///////////                          ///////////|
+#  |///////////                          ///////////|
+#  :                                                :
+#
+# The middle tile should start at 37.5 and go to 62.5 (centered on 50):
+#  .________________________________________________.
+#  |///////////        ///////////       ///////////|
+#  |///////////        ///////////       ///////////|
+#  :                                                :
+#
+# The second tile should start at 17.5 and go to 42.5 (centered on 30):
+#  .________________________________________________.
+#  |/////////XX\\\\\\\\X//////////       ///////////|
+#  |/////////XX\\\\\\\\X//////////       ///////////|
+#  :                                                :
+#
+# The fourth tile should start at 57.5 and go to 82.5 (centered on 70):
+#  .________________________________________________.
+#  |/////////XX\\\\\\\\X/////////X\\\\\\\XX/////////|
+#  |/////////XX\\\\\\\\X/////////X\\\\\\\XX/////////|
+#  :                                                :
+#
+# This can be seen as roughly centered on 10, 30, 50, 70, and 90, but
+# the edge cases need to be corrected. Tile N, for T tiles across an
+# image W wide, is centered on (N - 0.5) * (W / T)
+# And what's the correction?
+# For a tile P wide, the correction factor is 0.5 * ((W/T) - P)
+# The first value gets - correction, and the last gets + correction.
+#
+# Or you can see that the first one must start at the starting edge
+# and the last one must end at the ending edge.
+
+  # $correct = 0.5 * (($$v{W}/$$v{T}) - $$v{P});
+
+  if($$v{N} == 1) {
+    # short cut
+    return 0;
+  }
+
+  if($$v{N} == $$v{T}) {
+    # short cut
+    return ($$v{W} - $$v{P});
+  }
+
+  my $center = (($$v{N}-0.5)*($$v{W}/$$v{T}));
+  return( $center - ( $$v{P} / 2 ) );
+} # end &findstart_1d
+
+sub usage {
+  my $message = shift;
+  my $exit    = shift;
+
+  my $id = $0;
+  $id =~ s,^/.*/,,;
+
+  if(!defined($exit)) {
+    $exit = 0;
+  }
+  if(defined($message)) {
+    warn "$id: $message\n";
+    $exit = 2;
+  }
+
+  print <<"END_usage";
+$id: usage
+        pnmchop [ OPTIONS ] [ IMAGE.ppm ]
+
+Options:
+        -v         --verbose              be verbose
+	-f         --force                force tiles to overlap
+	-a         --allow                allow tiles to overlap
+	-n         --none                 tiles may not overlap
+	-r NUMxNUM --ratio        NUMxNUM use NUMxNUM as tile size ratio
+	-t NUM     --tilefraction NUM     tiles should be 1/NUM of image wide
+	-w NUM     --tilewide     NUM     tiles should NUM pixels wide
+	-p NUM     --gridplus     NUM     use grid + NUM for forced overlap
+	-o PREFIX  --output       PREFIX  use PREFIX for output files
+
+Chop an image into tiles. Prefers to have all tiles the same size, even if
+that would result in overlap. Only with -n (--none) will edge tiles be less
+than full size. Think of this as the opposite of a multiframe panoramic join.
+Ratio need not be integers. See pamdice for a similar tool: this prefers
+same sized tiles, pamdice prefers a regularly spaced grid for cuts.
+END_usage
+
+  exit($exit);
+} # end &usage
+
+__END__
+

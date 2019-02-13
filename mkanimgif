@@ -1,0 +1,152 @@
+#!/bin/ksh
+# Copyright 2014 by Eli the Bearded / Benjamin Elijah Griffin.
+
+usage () {
+  echo "mkanimgif usage: mkanimgif [ options ] IMAGES"
+  echo "The IMAGES can be GIFs or PGM/PPM files. Other files might work."
+  echo
+  echo "Options:"
+  echo "   -I 		use ImageMagick"
+  echo "   -G 		use Gifsicle"
+  echo "   -l 		do not loop video (default loops forever)"
+  echo "   -d N		set delay to N (default is 5)"
+  echo "   -o FILE	save output to FILE (default is 'animation.gif')"
+  echo "   -r WxH	resize output to Width x Height (no default resize)"
+  echo
+  echo "This is just a friendly wrapper for gifsicle, that tool can do much,"
+  echo "much more, including exact loop count, variable delays, interlacing..."
+  echo "http://www.lcdf.org/gifsicle/"
+  exit
+}
+
+gifloop=-l
+imgloop="-loop 0"
+
+gifdelay="-d"
+imgdelay="-delay"
+
+use=gifsicle
+
+delay=5
+
+out="animation.gif"
+resize=""
+
+del=
+imgs=
+
+argloop=yes
+while [ X$argloop != X ] ; do
+
+  case "$1" in
+  	   # -G 	use Gifsicle
+	-G) shift; use=gifsicle ;;
+
+  	   # -I 	use ImageMagick
+	-I) shift; use=convert ;;
+
+  	   # -l 	do not loop video
+	-l) shift; imgloop=""; gifloop=""; ;;
+
+  	   # -d N	set delay to N (try 1 to 5)
+	-d) shift; delay="$1"; shift ;;
+
+  	   # -o FILE	save output to FILE
+	-o) shift; out="$1"; shift ;;
+
+  	   # -r WxH	resize output to Width x Height
+	-r) shift; size="$1" ; resize="--resize $1"; shift ;;
+
+    --help) usage ;;
+	-*) echo "$1 unrecognized option"; usage ;;
+	'') if [ "X$imgs" = X ] ; then 
+	      echo "Insufficent arguments"; usage
+	    else
+	      argloop= 
+	    fi
+	    ;;
+	 *) imgs="$imgs $1" ; lastimg="$1" ; shift ;;
+  esac
+
+done
+
+prepared=n
+pnm=n
+
+case "$use" in
+	convert) prepared=y ;;
+	gifsicle)  
+		  case "$lastimg" in
+			  *.[gG][iI][fF]) prepared=y ;;
+			  *.[pP][bBgGpPnNaA][mM]) pnm=y ;; 
+		  esac
+		  ;;
+esac
+
+if [ $prepared = n ] ; then
+  pre=/tmp/$$
+
+  if [ $pnm = y ] ; then
+    echo "Selecting colors"
+    pnmcat -tb $imgs | pnmcolormap 255 > $pre.map
+    colors="-map $pre.map"
+    quant=""
+  else
+    colors=""
+    quant="| ppmquant 255 2>/dev/null"
+  fi
+
+  case "$size" in
+	*x*) xysize=$(echo $size | tr 'x' ' ')
+             resizetool="pnmscale -xy $xysize"
+             ;;
+          *) resizetool=cat
+             ;;
+  esac
+
+  if [ $pnm = n ] ; then
+    if [ $resizetool = cat ] ; then
+      resizetool=anytopnm
+    else
+      resizetool="anytopnm | $resizetool"
+    fi
+  fi
+
+  echo "Making frames"
+  gifs=
+  n=1
+  for img in $imgs ; do
+    echo "< $img $resizetool $quant | ppmtogif $colors > $pre.$n.gif"
+    eval "< $img $resizetool $quant | ppmtogif $colors > $pre.$n.gif"
+    gifs="$gifs $pre.$n.gif"
+    n=$(( $n + 1 ))
+  done
+
+  del="$gifs"
+  imgs="$gifs"
+fi
+
+case "$use" in
+	convert) 
+		  echo "Running: $use $imgdelay $delay $imgloop ( images ) \\"
+		  echo "     -ordered-dither o8x8,8 -coalesce -layers OptimizeTransparency $out"
+
+		  convert $imgdelay $delay $imgloop \
+		     $imgs \
+		     -ordered-dither o8x8,8 \
+		     -coalesce \
+		     -layers OptimizeTransparency \
+		     "$out"
+		  ;;
+	gifsicle)  
+		  echo "Running: $use -O3 -o $out $gifdelay $delay $gifloop ( images )"
+
+		  gifsicle -O3 -o $out $gifdelay $delay $gifloop $imgs
+		  ;;
+esac
+
+if [ $prepared = n ] ; then
+  rm -f $pre.map $del
+fi
+
+ls -lh $out

@@ -1,0 +1,58 @@
+#!/bin/ksh
+# 2019 Feb 12
+usage () {
+  echo "Make a panorama from an exploded video (pans make the best panoramas)."
+  echo "Slow pans and narrow slices work best, often slices near center will"
+  echo "have better focus."
+  echo ""
+  echo "  -f (-file)   FILELIST    file with list of image frames (required)"
+  echo "  -w (-width)  WIDTH       width of image slices (default 1)"
+  echo "  -o (-out)    OUTFILE     file to write (default stdout)"
+  echo "  -O (-offset) OFFSET      offset from left (default 0)"
+  echo "  -l (-left)               rotate left (ccw) before slicing"
+  echo "  -r (-right)              rotate right (cw) before slicing"
+  exit
+}
+
+flist=
+width=1
+offset=0
+fout=
+rotate=cat
+
+argparse=Yes
+while [ $argparse = Yes ]; do
+  arg="$1"
+
+  case "x$arg" in 
+    x) argparse=no ;;
+    x*) shift;;
+  esac
+
+  case "x$arg" in 
+    x) argparse=no ;;
+    x-f|x-file)    flist="$1"; shift ;;
+    x-w|x-width)   width="$1"; shift ;;
+    x-o|x-out)      fout="$1"; shift ;;
+    x-O|x-offset) offset="$1"; shift ;;
+    x-l|x-left)   rotate="pnmflip -ccw" ;;
+    x-r|x-right)  rotate="pnmflip -cw" ;;
+    x*) echo "Skipping arg $arg" ; usage ;;
+  esac
+
+done
+
+if [ "x$fout" != x ]; then
+  exec > $fout
+fi
+
+tlist=
+for file in $(< $flist); do
+  echo $file >&2
+  djpeg $file | $rotate | pnmcut -top 0 -left $offset -width $width > $file.pnm
+  tlist="$tlist $file.pnm"
+done
+
+echo pnmcat $fout >&2
+pnmcat -lr $tlist
+rm $tlist
