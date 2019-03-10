@@ -1,0 +1,78 @@
+#!/usr/bin/perl -w
+# print numbers for the range(s) on the command line.
+#
+# Example usage:
+# 
+#	$ nums 01-09 11 20-25
+#	01 02 03 04 05 06 07 08 09 11 20 21 22 23 24 25
+#
+# The count of leading zeros is taken from the usage on the command line.
+#
+use strict;
+use vars qw( $i $arg $start $stop $len $zeros $space $skip $pre $post );
+
+$skip  = 1;
+$space = ' ';
+$pre   = '';
+$post  = '';
+
+for $arg (@ARGV) {
+  if ($arg =~ /^--/) {
+    if ($arg =~ /^--(-?\d+)$/) {
+      $skip = $1;
+    } elsif ($arg =~ /^--nl$/) {
+      $space = "\n";
+    } elsif ($arg =~ /^--sp$/) {
+      $space = " ";
+    } elsif ($arg =~ /^--tab$/) {
+      $space = "\t";
+    } elsif ($arg =~ /^--pre=(.*)$/) {
+      $pre = "$1";
+    } elsif ($arg =~ /^--post=(.*)$/) {
+      $post = "$1";
+    } elsif ($arg =~ /^--(h|help)$/) {
+      print STDERR "$0: usage\n";
+      print STDERR "nums takes a list of numbers, number ranges, and options\n";
+      print STDERR "numbers (including those from ranges) are printed in the\n";
+      print STDERR "order found on the command line. Options are processed\n";
+      print STDERR "the order found on the command line. Numbers in a range\n";
+      print STDERR "are zero padded to the length of the first number.\n";
+      print STDERR "\n";
+      print STDERR "Format of a range: (start)-(end)\n";
+      print STDERR "Options:\n";
+      print STDERR "  --NUM      makes the increment value NUM (default 1)\n";
+      print STDERR "  --nl       makes the output seperator a new line (default space)\n";
+      print STDERR "  --sp       makes the output seperator a space (default space)\n";
+      print STDERR "  --tab      makes the output seperator a tab (default space)\n";
+      print STDERR "  --pre=STR  prefix each number with STR\n";
+      print STDERR "  --post=STR postfix each number with STR\n";
+      print STDERR "  --help     prints this message\n";
+      print STDERR "\n";
+      print STDERR "Example: nums 0001-99 ---13 1300-1000\n";
+      print STDERR "Result: prints 1 to 99 padded to four digits, and then 1300 to 1000 going up\n";
+      print STDERR "-13 (down by 13) at a time.\n";
+      print STDERR "Example: nums --pre=frames.d/ --post=.jpg 00000021-140\n";
+      print STDERR "Result: prints filenames of frames 21 to 140 (naming style typical of\n";
+      print STDERR "'mplayer -vo jpeg:outdir=frames.d video.avi')\n";
+
+    }
+  } elsif ($arg =~ /^(-?\d+)-(-?\d+)$/) {
+    $start = $1;
+    $stop  = $2;
+
+    $len = length ($start);
+
+    for ($i = $start; ($skip > 0)? ($i <= $stop) : ($i >= $stop); $i += $skip) {
+      #$zeros = $len - length($i);
+      #print '0' x $zeros;
+      #print $i . $space;
+      printf("$pre%0${len}d$post%s", $i, $space);
+    }
+  } else {
+    print "$pre$arg$post$space";
+  }
+
+}
+
+print "\n" if ($space ne "\n");
+__END__
