@@ -11,6 +11,8 @@ usage () {
   echo "  -O (-offset) OFFSET      offset from left (default 0)"
   echo "  -l (-left)               rotate left (ccw) before slicing"
   echo "  -r (-right)              rotate right (cw) before slicing"
+  echo "  -L (-lefttoright)        assemble left-to-right (default)"
+  echo "  -R (-righttoleft)        assemble right-to-left"
   exit
 }
 
@@ -19,6 +21,7 @@ width=1
 offset=0
 fout=
 rotate=cat
+join=lr
 
 argparse=Yes
 while [ $argparse = Yes ]; do
@@ -31,12 +34,14 @@ while [ $argparse = Yes ]; do
 
   case "x$arg" in 
     x) argparse=no ;;
-    x-f|x-file)    flist="$1"; shift ;;
-    x-w|x-width)   width="$1"; shift ;;
-    x-o|x-out)      fout="$1"; shift ;;
-    x-O|x-offset) offset="$1"; shift ;;
-    x-l|x-left)   rotate="pnmflip -ccw" ;;
-    x-r|x-right)  rotate="pnmflip -cw" ;;
+    x-f|x-file)     flist="$1"; shift ;;
+    x-w|x-width)    width="$1"; shift ;;
+    x-o|x-out)       fout="$1"; shift ;;
+    x-O|x-offset)  offset="$1"; shift ;;
+    x-l|x-left)    rotate="pnmflip -ccw" ;;
+    x-r|x-right)   rotate="pnmflip -cw" ;;
+    x-L|x-leftt*)    join=lr ;;
+    x-R|x-rightt*)   join=rl ;;
     x*) echo "Skipping arg $arg" ; usage ;;
   esac
 
@@ -46,13 +51,25 @@ if [ "x$fout" != x ]; then
   exec > $fout
 fi
 
+n=0
 tlist=
 for file in $(< $flist); do
+  if [ $n = 100 ] ; then
+    # pnmcat: too many open files
+    # probably happens ~1024 but if coding for this, let's go more frequent
+    echo pnmcat $file.pre >&2
+    pnmcat -$join $tlist > $file.pre
+    rm $tlist
+    tlist=$file.pre
+    n=0
+  fi
+
   echo $file >&2
   djpeg $file | $rotate | pnmcut -top 0 -left $offset -width $width > $file.pnm
   tlist="$tlist $file.pnm"
+  n=$(( $n + 1 ))
 done
 
 echo pnmcat $fout >&2
-pnmcat -lr $tlist
+pnmcat -$join $tlist
 rm $tlist
