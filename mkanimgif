@@ -1,5 +1,4 @@
 #!/bin/ksh
-# Copyright 2014 by Eli the Bearded / Benjamin Elijah Griffin.
 
 usage () {
   echo "mkanimgif usage: mkanimgif [ options ] IMAGES"
@@ -9,6 +8,8 @@ usage () {
   echo "   -I 		use ImageMagick"
   echo "   -G 		use Gifsicle"
   echo "   -l 		do not loop video (default loops forever)"
+  echo "   -D 		use dithering"
+  echo "   -q N		set quant to N (default is 255)"
   echo "   -d N		set delay to N (default is 5)"
   echo "   -o FILE	save output to FILE (default is 'animation.gif')"
   echo "   -r WxH	resize output to Width x Height (no default resize)"
@@ -19,11 +20,16 @@ usage () {
   exit
 }
 
+quant=255
+
 gifloop=-l
 imgloop="-loop 0"
 
 gifdelay="-d"
 imgdelay="-delay"
+
+gifdither=
+imgdither=
 
 use=gifsicle
 
@@ -45,17 +51,23 @@ while [ X$argloop != X ] ; do
   	   # -I 	use ImageMagick
 	-I) shift; use=convert ;;
 
+  	   # -D 	use dithering
+	-D) shift; imgdither="-ordered-dither o8x8,8"; gifdither="-f"; ;;
+
   	   # -l 	do not loop video
 	-l) shift; imgloop=""; gifloop=""; ;;
 
   	   # -d N	set delay to N (try 1 to 5)
 	-d) shift; delay="$1"; shift ;;
 
+  	   # -q N	set quant to N (try 1 to 5)
+	-q) shift; quant="$1"; shift ;;
+
   	   # -o FILE	save output to FILE
 	-o) shift; out="$1"; shift ;;
 
   	   # -r WxH	resize output to Width x Height
-	-r) shift; size="$1" ; resize="--resize $1"; shift ;;
+	-r) shift; size="$1" ; resize="-resize $1"; shift ;;
 
     --help) usage ;;
 	-*) echo "$1 unrecognized option"; usage ;;
@@ -88,12 +100,12 @@ if [ $prepared = n ] ; then
 
   if [ $pnm = y ] ; then
     echo "Selecting colors"
-    pnmcat -tb $imgs | pnmcolormap 255 > $pre.map
+    pnmcat -tb $imgs | pnmcolormap $quant > $pre.map
     colors="-map $pre.map"
     quant=""
   else
     colors=""
-    quant="| ppmquant 255 2>/dev/null"
+    quant="| ppmquant $quant 2>/dev/null"
   fi
 
   case "$size" in
@@ -128,20 +140,19 @@ fi
 
 case "$use" in
 	convert) 
-		  echo "Running: $use $imgdelay $delay $imgloop ( images ) \\"
-		  echo "     -ordered-dither o8x8,8 -coalesce -layers OptimizeTransparency $out"
+		  echo "Running: $use $resize $imgdelay $delay $imgloop ( images ) \\"
+		  echo "     $imgdither -coalesce -layers OptimizeTransparency $out"
 
-		  convert $imgdelay $delay $imgloop \
+		  time convert $resize $imgdelay $delay $imgloop \
 		     $imgs \
-		     -ordered-dither o8x8,8 \
-		     -coalesce \
+		     $imgdither -coalesce \
 		     -layers OptimizeTransparency \
 		     "$out"
 		  ;;
 	gifsicle)  
-		  echo "Running: $use -O3 -o $out $gifdelay $delay $gifloop ( images )"
+		  echo "Running: $use -O3 -o $out $gifdither $gifdelay $delay $gifloop ( images )"
 
-		  gifsicle -O3 -o $out $gifdelay $delay $gifloop $imgs
+		  gifsicle -O3 -o $out $gifdither $gifdelay $delay $gifloop $imgs
 		  ;;
 esac
 
