@@ -1,0 +1,8 @@
+#!/bin/sh
+# "apt-get install webp"
+# wrap dwebp for pam output (retains any alpha channel)
+
+file="$1"
+case "X$file" in X) file=- ;; esac
+
+dwebp -pam -o - -- "$file"
