@@ -1,0 +1,64 @@
+#!/bin/sh
+# April 2019
+# Wrapper for example in comp.lang.postscript by Guy@guyalias.tk
+
+usage() {
+  echo "Use 'gs' (ghostscript) to create a PDF file from a JPEG."
+  echo "jpegtopdf -i image.jpeg   -o document.pdf"
+  echo "jpegtopdf --in image.jpeg --out document.pdf"
+  exit $1;
+}
+
+out=
+in=
+args=y
+while [ y = $args ]; do
+  case "$1" in
+    -i|--in) shift; in="$1"; shift ;;
+    -o|--out) shift; out="$1"; shift ;;
+    -h|--help) usage 0 ;;
+    ?*) echo "Don't know what to do with $1"; usage 2 ;;
+    *) args=n ;;
+  esac
+done
+
+del=
+cat=
+
+if [ "x$in" = x- ] ; then
+  in=/tmp/in-jpegtopdf.$$
+  del="$del $in"
+  cat > "$in"
+fi
+
+if [ "x$in" = x -o ! -f "$in" ] ; then
+  echo "$0: input file missing"
+  echo "Use --help for usage"
+  exit 1
+fi
+
+if [ "x$out" = x ] ; then
+  out=document.pdf
+  echo "$0: using $out for output"
+fi
+
+if [ "x$out" = x- ] ; then
+  out=/tmp/out-jpegtopdf.$$
+  del="$del $out"
+  cat="$out"
+fi
+
+# ghostscript sends output to stdout, but we may do that ourselves, use
+# stderr instead. viewjpeg.ps is typically installed with gs to somewhere
+# like /usr/share/ghostscript/${VERSION}/lib/viewjpeg.ps
+gs -sDEVICE=pdfwrite -o "$out" viewjpeg.ps -c "($in)viewJPEG" 1>&2
+rc=$?
+
+if [ "x$cat" -a -f "$cat" ]; then 
+  cat "$cat"
+fi
+
+if [ "x$rm" ]; then 
+  rm -f $rm
+fi
+exit $rc
