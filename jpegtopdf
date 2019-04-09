@@ -1,11 +1,31 @@
 #!/bin/sh
 # April 2019
 # Wrapper for example in comp.lang.postscript by Guy@guyalias.tk
+# ghostscript 9.23 or later will embed JPEG files ("JPEGPassThrough")
+# rather than  rewrite them to be embedded bitmaps. This makes a huge
+# difference in output filesize.
 
 usage() {
   echo "Use 'gs' (ghostscript) to create a PDF file from a JPEG."
   echo "jpegtopdf -i image.jpeg   -o document.pdf"
   echo "jpegtopdf --in image.jpeg --out document.pdf"
+
+  version=$(gs --version 2>&1)
+  # 9.23 is acceptable threshold
+
+  case "x$version" in 
+    x[0-8].*)      low=1 ;;
+    x9.[0-9])      low=1 ;;
+    x9.[01][0-9])  low=1 ;;
+    x9.2[012])     low=1 ;;
+    x9.*)          low=0 ;;
+    x[0-9][0-9].*) low=0 ;;
+    x*) echo "Warning: is ghostscript installed? Version check failed."
+        low=-1 ;;
+  esac
+  if [ 1 = "$low" ] ; then
+    echo "Warning ghostscript less than 9.23; output may not be good."
+  fi
   exit $1;
 }
 
