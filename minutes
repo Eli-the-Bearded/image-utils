@@ -1,0 +1,65 @@
+#!/usr/bin/perl
+# 16 September 2017
+use strict;
+use warnings;
+
+sub usage {
+  my $mess = shift;
+  print "$0: $mess\n" if $mess;
+  print "  minute [ seconds | W:DD:HH:MM:SS | DD:HH:MM:SS | HH:MM:SS | MM:SS ]\n";
+  print "Convert between seconds and hour:minute:seconds (up to weeks)\n";
+  print "Eg: 90 => 1:30\n";
+  exit;
+}
+
+
+my $value = shift;
+my $out;
+
+my @mult;
+
+if(!defined($value)) {
+  usage('Need an argument.');
+}
+if($value !~ /^\d[:\d]*$/) {
+  usage('Use second value or [HH:]MM:SS');
+}
+
+while (defined($value)) {
+# needs resetting every loop
+#          week        day       hour   mm  ss
+  @mult = (7*24*60*60, 24*60*60, 60*60, 60, 1);
+
+  if($value =~ /:/) {
+    # convert to seconds
+    my @parts = split(/:/, $value);
+    $out = 0;
+    while(@parts) {
+      $out += pop(@mult) * pop(@parts);
+    }
+  } elsif ($value =~ /\d+/) {
+    # convert from seconds
+    $out = '';
+    while($value > 0) {
+      my $col = shift(@mult);
+      if($col <= $value) {
+	my $pos = int($value / $col);
+	$value -= $pos * $col;
+	$out .= "$pos:";
+      }
+    }
+    # fix for "7200" yeilding just "2"
+    while( shift(@mult) ) { $out .= '00:'; }
+
+    # zero pad secondary numbers
+    # 1:2:3: => 1:02:3: => 1:02:03:
+    while($out =~ /:\d:/) { $out =~ s/:(\d):/:0$1:/ }
+
+    #                      1:02:03: => 1:02:03
+    $out =~ s/:$//;
+  }
+
+  print "$out\n";
+  $value = shift;
+}
+__END__
