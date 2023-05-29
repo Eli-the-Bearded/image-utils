@@ -21,10 +21,13 @@
 #       -e N       --even N          evenly spread N in a circle
 #       -d D,D,... --degrees D,D,... use specified angles
 #       -l A,X1,Y1,X2,Y2
+#       -l   X1,Y1,X2,Y2
 #                  --line A,X1,Y1,X2,Y2
+#                  --line   X1,Y1,X2,Y2
 #                                    the line through (X1,Y1),(X2,Y2) should
 #                                    be at angle A relative to the X axis;
-#                                    angle A can be a real number
+#                                    angle A can be a real number, uses A=0.0
+#                                    if omitted
 #	           --help            display a help message
 #
 # One of -e (--even), -d (--degrees), or -l (--line) must be specified for
@@ -91,7 +94,7 @@ while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
     } elsif (($ARGV[0] eq '-d') or ($ARGV[0] eq '--degrees'))  {
       shift;
       $set = shift;
-      if(!defined($set) or $set !~ /^\d+(,\d+)*$/) {
+      if(!defined($set) or $set !~ /^[\d.]+(,[\d.]+)*$/) {
         warn "$0: misuse of -d (--degrees) option; --help for help\n";
 	$err ++;
       }
@@ -113,11 +116,16 @@ while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
     } elsif (($ARGV[0] eq '-l') or ($ARGV[0] eq '--line'))  {
       shift;
       $set = shift;
-      if(!defined($set) or $set !~ /^[\d.]+,\d+,\d+,\d+,\d+$/) {
+      if(!defined($set) or $set !~ /^(-?[\d.]+,)?\d+,\d+,\d+,\d+$/) {
         warn "$0: misuse of -l (--line) option; --help for help\n";
 	$err ++;
       }
-      ($adjust,$X1,$Y1,$X2,$Y2) = split(/,/,$set);
+      if ($set =~ s/^(-?[\d.]+),(\d+,\d+,\d+,\d+)$/$2/) {
+        $adjust = $1;
+      } else {
+        $adjust = 0.0;
+      }
+      ($X1,$Y1,$X2,$Y2) = split(/,/,$set);
       eval 'use Math::Trig;';
       if ($@) {
         die "$0: Can't use Math::Trig: $@\n-l (--line) mode unavailable.\n";
@@ -157,8 +165,10 @@ while(defined($ARGV[0]) and substr($ARGV[0], 0, 1) eq '-') {
       push(@angles, ($angleC + $adjust));
 
       $set = undef;
-      printf STDERR "(X1,Y1),(X2,Y2): ($X1,$Y1),($X2,$Y2); angle adjust $adjust\n";
-      printf STDERR "angle C is $angleC, will rotate to $angles[-1]\n";
+      if ($verbose) {
+	printf STDERR "(X1,Y1),(X2,Y2): ($X1,$Y1),($X2,$Y2); angle adjust $adjust\n";
+	printf STDERR "angle C is $angleC, will rotate to $angles[-1]\n";
+      }
 
     } elsif($ARGV[0] eq '--help') {
       print << "USAGEmessage";
@@ -169,25 +179,25 @@ The files can be any format handled by anytopnm
 New files will be created.
 
 Options:
-      -a         --aliased         use -noantialias with pnmrotate
-      -v         --verbose         print commands before running
-      -t         --savetmp         do not delete tmp files
-      -m         --mask            use a mask to make new areas white
-      -c         --crop            run through pnmcrop
-      -e N       --even N          evenly spread N in a circle
-      -d D,D,... --degrees D,D,... use specified angles
-      -l A,LINE  --line A,LINE     make line be at angle A (see below)
-                 --help            display a help message
+      -a          --aliased         use -noantialias with pnmrotate
+      -v          --verbose         print commands before running
+      -t          --savetmp         do not delete tmp files
+      -m          --mask            use a mask to make new areas white
+      -c          --crop            run through pnmcrop
+      -e N        --even N          evenly spread N in a circle
+      -d D,D,...  --degrees D,D,... use specified angles
+      -l [A,]LINE --line [A,]LINE   make line be at angle A (see below)
+                  --help            display a help message
 
 One of -e (--even), -d (--degrees), or -l (--line) must be specified for
 anything to be done.
 
-The -l (--line) argument takes a real (or integer) angle and two
-coordinate pairs: A,X1,Y1,X2,Y2. It rotates the image so the line
-specified is at angle A relative to the X axis. For accuracy, choose
-points as distant as possible on the line. An angle of 0 makes the
-line parallel to the axis, an angle of 90 makes it perpendicular,
-and an angle of 180 would be parallel and upside down.
+The -l (--line) argument takes a real (or integer) angle (optional, defaults
+to 0.0) and two coordinate pairs: A,X1,Y1,X2,Y2. It rotates the image so the
+line specified is at angle A relative to the X axis. For accuracy, choose
+points as distant as possible on the line. An angle of 0 makes the line
+parallel to the axis, an angle of 90 makes it perpendicular, and an angle of
+180 would be parallel and upside down.
 USAGEmessage
       exit 2;
     } else {
